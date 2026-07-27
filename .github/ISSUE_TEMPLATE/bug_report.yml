@@ -1,0 +1,57 @@
+name: 🐛 Bug report
+description: Щось не працює так, як має
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Що сталося
+      description: Коротко й по суті опишіть проблему.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Очікувана поведінка
+      description: Що мало статися замість цього.
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Кроки для відтворення
+      placeholder: |
+        1. Натиснув «➕ Створити вішліст»
+        2. Ввів назву …
+        3. Побачив помилку …
+    validations:
+      required: false
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Роль
+      options:
+        - Власник вішліста
+        - Гість (перегляд/бронювання)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Середовище
+      options:
+        - Продакшн (вебхук на Vercel)
+        - Локально (long polling)
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Скріншоти / логи / додатковий контекст
+    validations:
+      required: false

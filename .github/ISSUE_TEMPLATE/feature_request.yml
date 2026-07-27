@@ -1,0 +1,41 @@
+name: ✨ Feature request
+description: Ідея нової можливості чи покращення
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Яку проблему це вирішує
+      description: Що зараз незручно, неможливо чи відсутнє.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Пропоноване рішення
+      description: Як, на вашу думку, це має працювати.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Частина бота
+      options:
+        - Вішлісти (створення/налаштування)
+        - Товари (додавання/редагування)
+        - Бронювання
+        - Гостьовий перегляд
+        - Підписки/сповіщення
+        - Інфраструктура/деплой
+        - Інше
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Додатковий контекст
+    validations:
+      required: false

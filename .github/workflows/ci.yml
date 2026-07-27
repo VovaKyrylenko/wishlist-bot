@@ -1,0 +1,38 @@
+name: CI
+
+# Обов'язкова перевірка для branch protection на main: типи + лінт + компіляція
+# на кожен PR і push у main. Prisma-схема не потребує реального DATABASE_URL
+# для `generate` (лише для migrate/runtime), тому CI не має жодних секретів.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

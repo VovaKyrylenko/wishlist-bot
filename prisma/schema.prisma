@@ -1,0 +1,143 @@
+// Prisma schema for the wishlist Telegram bot.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// A Telegram user — can own wishlists and/or make reservations as a guest.
+model User {
+  id           String   @id @default(cuid())
+  telegramId   String   @unique
+  username     String?
+  firstName    String?
+  lastName     String?
+  contactPhone String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  wishlists     Wishlist[]        @relation("OwnedWishlists")
+  editorAccess  WishlistEditor[]
+  reservations  Reservation[]
+  subscriptions Subscription[]
+
+  @@index([telegramId])
+}
+
+enum PrivacyMode {
+  SURPRISE // owner does not see who/what/how much was reserved
+  OPEN // owner sees full reservation details
+}
+
+enum WishlistStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Wishlist {
+  id          String         @id @default(cuid())
+  slug        String         @unique // used in the deep link: t.me/bot?start=list_<slug>
+  title       String
+  description String?
+  eventDate   DateTime?
+  privacyMode PrivacyMode    @default(SURPRISE)
+  status      WishlistStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  ownerId String
+  owner   User   @relation("OwnedWishlists", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  items         WishlistItem[]
+  editors       WishlistEditor[]
+  subscriptions Subscription[]
+
+  @@index([ownerId])
+}
+
+model WishlistEditor {
+  id         String   @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addedAt    DateTime @default(now())
+
+  @@unique([wishlistId, userId])
+}
+
+enum Priority {
+  HIGH // 🔥 Дуже хочу
+  NORMAL // ⭐ Хочу
+  LOW // 💭 Було б приємно
+}
+
+enum ItemStatus {
+  ACTIVE
+  DELETED
+}
+
+model WishlistItem {
+  id           String     @id @default(cuid())
+  wishlistId   String
+  wishlist     Wishlist   @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  title        String
+  url          String?
+  imageUrl     String?
+  price        String?
+  store        String?
+  comment      String?
+  priority     Priority   @default(NORMAL)
+  quantity     Int        @default(1)
+  sortOrder    Int        @default(0)
+  status       ItemStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  reservations Reservation[]
+
+  @@index([wishlistId])
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CANCELLED
+  PURCHASED
+}
+
+model Reservation {
+  id            String            @id @default(cuid())
+  itemId        String
+  item          WishlistItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  guestId       String
+  guest         User              @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  quantity      Int
+  contactSnapshot String? // guest's contact name/username/phone at time of booking
+  status        ReservationStatus @default(ACTIVE)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([itemId])
+  @@index([guestId])
+}
+
+model Subscription {
+  id         String   @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([wishlistId, userId])
+}
+
+// Persists grammY conversation/session state across serverless webhook invocations.
+model BotSession {
+  key   String @id
+  value String
+}
