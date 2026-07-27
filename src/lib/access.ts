@@ -1,6 +1,7 @@
 import type { MyContext } from "../context.js";
 import { prisma } from "../db.js";
 import { upsertUserFromCtx } from "./users.js";
+import { t } from "../text.js";
 
 /**
  * Loads a wishlist and verifies the sender may act on it, answering the
@@ -15,13 +16,13 @@ export async function checkWishlistAccess(ctx: MyContext, wishlistId: string, re
     include: { editors: true },
   });
   if (!wishlist) {
-    await ctx.answerCallbackQuery({ text: "Список не знайдено", show_alert: true });
+    await ctx.answerCallbackQuery({ text: t.common.notFoundAlert, show_alert: true });
     return null;
   }
   const isOwner = wishlist.ownerId === user.id;
   const isEditor = wishlist.editors.some((e) => e.userId === user.id);
   if (requireOwner ? !isOwner : !isOwner && !isEditor) {
-    await ctx.answerCallbackQuery({ text: "Немає доступу", show_alert: true });
+    await ctx.answerCallbackQuery({ text: t.common.noAccessAlert, show_alert: true });
     return null;
   }
   return { wishlist, user, isOwner, isEditor };

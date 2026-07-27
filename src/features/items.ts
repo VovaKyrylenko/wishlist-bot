@@ -8,21 +8,20 @@ import { escapeHtml, formatDate, PRIORITY_ICON } from "../lib/format.js";
 import { notifyGuestItemRemoved } from "../lib/notify.js";
 import { notifyNewItemToSubscribers } from "./subscriptions.js";
 import type { Priority } from "../../generated/prisma/enums.js";
-
-const SKIP = "-";
+import { t } from "../text.js";
 
 function parseSkippable(raw: string): string | null {
-  const t = raw.trim();
-  return t === SKIP || t.length === 0 ? null : t;
+  const v = raw.trim();
+  return v === t.common.skip || v.length === 0 ? null : v;
 }
 
 function priorityKeyboard(prefix = "priority"): InlineKeyboard {
   return new InlineKeyboard()
-    .text("🔥 Дуже хочу", `${prefix}:HIGH`)
+    .text(t.buttons.priorityHigh, `${prefix}:HIGH`)
     .row()
-    .text("⭐ Хочу", `${prefix}:NORMAL`)
+    .text(t.buttons.priorityNormal, `${prefix}:NORMAL`)
     .row()
-    .text("💭 Було б приємно", `${prefix}:LOW`);
+    .text(t.buttons.priorityLow, `${prefix}:LOW`);
 }
 
 export async function renderWishlistManagement(ctx: MyContext, wishlistId: string) {
@@ -41,26 +40,26 @@ export async function renderWishlistManagement(ctx: MyContext, wishlistId: strin
     `${wishlist.status === "ARCHIVED" ? "📦" : "🎁"} <b>${escapeHtml(wishlist.title)}</b>`,
     wishlist.description ? escapeHtml(wishlist.description) : null,
     wishlist.eventDate ? `📅 ${formatDate(wishlist.eventDate)}` : null,
-    `${items.length} бажань`,
+    t.item.itemsHeader(items.length),
   ]
     .filter((l) => l !== null)
     .join("\n");
 
   const headerKb = new InlineKeyboard();
   if (wishlist.status === "ACTIVE") {
-    headerKb.text("➕ Додати бажання", `item:add:${wishlistId}`).row();
+    headerKb.text(t.buttons.addItem, `item:add:${wishlistId}`).row();
   }
-  headerKb.text("⚙️ Налаштування", `wl:settings:${wishlistId}`).text("📋 Мої вішлісти", "wl:list");
+  headerKb.text(t.buttons.settings, `wl:settings:${wishlistId}`).text(t.buttons.menuMyLists, "wl:list");
 
   await ctx.reply(header, { parse_mode: "HTML", reply_markup: headerKb });
 
   for (const [index, item] of items.entries()) {
     const a = computeAvailability(item.quantity, item.reservations);
     const statusLine = a.isFull
-      ? "✅ Уже заброньовано"
+      ? t.item.fullyReserved
       : a.reserved > 0
-        ? `Потрібно: ${item.quantity}\nЗаброньовано: ${a.reserved}\nЗалишилось: ${a.available}`
-        : `Потрібно: ${item.quantity}\nСтатус: доступно`;
+        ? t.item.availabilityDetail(item.quantity, a.reserved, a.available)
+        : t.item.availableStatus(item.quantity);
 
     const lines = [
       `${PRIORITY_ICON[item.priority]} <b>${escapeHtml(item.title)}</b>`,
@@ -70,14 +69,14 @@ export async function renderWishlistManagement(ctx: MyContext, wishlistId: strin
     ].filter((l) => l !== null);
 
     const kb = new InlineKeyboard();
-    if (item.url) kb.url("🔗 Відкрити посилання", item.url).row();
-    kb.text("✏️ Редагувати", `item:edit:${item.id}`)
-      .text("📌 Пріоритет", `item:priority:${item.id}`)
+    if (item.url) kb.url(t.buttons.openLink, item.url).row();
+    kb.text(t.buttons.editItem, `item:edit:${item.id}`)
+      .text(t.buttons.priority, `item:priority:${item.id}`)
       .row()
-      .text("🔢 Кількість", `item:qty:${item.id}`);
-    if (index > 0) kb.text("⬆️", `item:up:${item.id}`);
-    if (index < items.length - 1) kb.text("⬇️", `item:down:${item.id}`);
-    kb.row().text("🗑 Видалити", `item:delete:${item.id}`);
+      .text(t.buttons.quantity, `item:qty:${item.id}`);
+    if (index > 0) kb.text(t.buttons.moveUp, `item:up:${item.id}`);
+    if (index < items.length - 1) kb.text(t.buttons.moveDown, `item:down:${item.id}`);
+    kb.row().text(t.buttons.deleteItem, `item:delete:${item.id}`);
 
     await ctx.reply(lines.join("\n"), { parse_mode: "HTML", reply_markup: kb });
   }
@@ -87,10 +86,9 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
   const access = await conversation.external((c) => checkWishlistAccess(c, wishlistId, false));
   if (!access) return;
 
-  await ctx.reply(
-    "Надішліть посилання на товар — спробую сам витягнути назву, фото та ціну.\n\nАбо натисніть кнопку і введіть все вручну.",
-    { reply_markup: new InlineKeyboard().text("✍️ Ввести вручну", "manual") },
-  );
+  await ctx.reply(t.item.askLinkOrManual, {
+    reply_markup: new InlineKeyboard().text(t.buttons.manualEntry, "manual"),
+  });
 
   const first = await conversation.wait();
 
@@ -102,19 +100,19 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
 
   if (first.callbackQuery?.data === "manual") {
     await first.answerCallbackQuery();
-    await ctx.reply("Введіть назву товару:");
+    await ctx.reply(t.item.askTitleManual);
     title = await conversation.form.text();
   } else if (first.message?.text && /^https?:\/\//i.test(first.message.text.trim())) {
     url = first.message.text.trim();
-    await ctx.reply("🔎 Дивлюся, що там...");
+    await ctx.reply(t.item.lookingUpLink);
     const preview = await conversation.external(() => fetchLinkPreview(url as string));
 
     if (preview?.title || preview?.price) {
-      const previewTitle = preview.title ?? "Без назви";
+      const previewTitle = preview.title ?? t.item.untitledFallback;
       const lines = [
         `<b>${escapeHtml(previewTitle)}</b>`,
-        preview.price ? `Ціна: ${escapeHtml(preview.price)}` : null,
-        preview.store ? `Магазин: ${escapeHtml(preview.store)}` : null,
+        preview.price ? t.item.previewPrice(escapeHtml(preview.price)) : null,
+        preview.store ? t.item.previewStore(escapeHtml(preview.store)) : null,
       ]
         .filter((l): l is string => l !== null)
         .join("\n");
@@ -122,21 +120,21 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
       await ctx.reply(lines, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("Додати", "add")
-          .text("Редагувати", "edit")
+          .text(t.buttons.add, "add")
+          .text(t.buttons.edit, "edit")
           .row()
-          .text("Скасувати", "cancel"),
+          .text(t.buttons.cancel, "cancel"),
       });
 
       const decision = await conversation.waitForCallbackQuery(["add", "edit", "cancel"]);
       await decision.answerCallbackQuery();
 
       if (decision.callbackQuery.data === "cancel") {
-        await ctx.reply("Скасовано.");
+        await ctx.reply(t.common.cancelled);
         return;
       }
       if (decision.callbackQuery.data === "edit") {
-        await ctx.reply("Введіть правильну назву:");
+        await ctx.reply(t.item.askCorrectTitle);
         title = await conversation.form.text();
       } else {
         title = previewTitle;
@@ -145,53 +143,51 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
       price = preview.price;
       store = preview.store;
     } else {
-      await ctx.reply("Не вдалося автоматично розпізнати товар за посиланням. Введіть назву вручну:");
+      await ctx.reply(t.item.previewNotFound);
       title = await conversation.form.text();
     }
   } else if (first.message?.text) {
     title = first.message.text.trim();
   } else {
-    await ctx.reply("Введіть назву товару текстом:");
+    await ctx.reply(t.item.askTitleAsText);
     title = await conversation.form.text();
   }
 
   if (!title) {
-    await ctx.reply("Введіть назву товару текстом:");
+    await ctx.reply(t.item.askTitleAsText);
     title = await conversation.form.text();
   }
 
   if (!url) {
-    await ctx.reply("Посилання на товар (необов'язково). Надішліть «-», щоб пропустити.");
+    await ctx.reply(t.item.askUrlOptional);
     url = parseSkippable(await conversation.form.text());
   }
   if (!price) {
-    await ctx.reply("Ціна (необов'язково). Надішліть «-», щоб пропустити.");
+    await ctx.reply(t.item.askPriceOptional);
     price = parseSkippable(await conversation.form.text());
   }
   if (!store) {
-    await ctx.reply("Магазин (необов'язково). Надішліть «-», щоб пропустити.");
+    await ctx.reply(t.item.askStoreOptional);
     store = parseSkippable(await conversation.form.text());
   }
 
-  await ctx.reply("Скільки одиниць потрібно? Введіть число (наприклад, 1).");
+  await ctx.reply(t.item.askQuantity);
   let quantity = 1;
   while (true) {
     const q = await conversation.form.int({
-      otherwise: (c) => c.reply("Будь ласка, надішліть ціле число, наприклад 1."),
+      otherwise: (c) => c.reply(t.item.askQuantityInteger),
     });
     if (q >= 1) {
       quantity = q;
       break;
     }
-    await ctx.reply("Кількість має бути щонайменше 1, спробуйте ще раз.");
+    await ctx.reply(t.item.quantityTooLow);
   }
 
-  await ctx.reply(
-    "Додайте коментар (необов'язково, наприклад бажаний колір чи розмір). Надішліть «-», щоб пропустити.",
-  );
+  await ctx.reply(t.item.askCommentOptional);
   const comment = parseSkippable(await conversation.form.text());
 
-  await ctx.reply("Наскільки сильно хочете цей подарунок?", { reply_markup: priorityKeyboard() });
+  await ctx.reply(t.item.askPriorityForNewItem, { reply_markup: priorityKeyboard() });
   const pr = await conversation.waitForCallbackQuery(["priority:HIGH", "priority:NORMAL", "priority:LOW"]);
   await pr.answerCallbackQuery();
   const priority = pr.callbackQuery.data.split(":")[1] as Priority;
@@ -217,7 +213,7 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
     });
   });
 
-  await ctx.reply(`✅ Додано «${title}» до списку.`);
+  await ctx.reply(t.item.added(title));
 
   await conversation.external((c) =>
     notifyNewItemToSubscribers(c.api, wishlistId, access.wishlist.title, item.title),
@@ -229,15 +225,6 @@ export async function addItemConversation(conversation: MyConversation, ctx: MyC
 const EDIT_FIELDS = ["title", "url", "price", "store", "comment", "quantity"] as const;
 type EditField = (typeof EDIT_FIELDS)[number];
 
-const EDIT_FIELD_PROMPT: Record<EditField, string> = {
-  title: "Введіть нову назву:",
-  url: "Введіть нове посилання. Надішліть «-», щоб прибрати посилання.",
-  price: "Введіть нову ціну. Надішліть «-», щоб прибрати ціну.",
-  store: "Введіть новий магазин. Надішліть «-», щоб прибрати магазин.",
-  comment: "Введіть новий коментар. Надішліть «-», щоб прибрати коментар.",
-  quantity: "Скільки одиниць потрібно? Введіть ціле число.",
-};
-
 export async function editItemFieldConversation(
   conversation: MyConversation,
   ctx: MyContext,
@@ -246,13 +233,13 @@ export async function editItemFieldConversation(
 ) {
   const item = await conversation.external(() => prisma.wishlistItem.findUnique({ where: { id: itemId } }));
   if (!item) {
-    await ctx.reply("Товар не знайдено.");
+    await ctx.reply(t.item.notFound);
     return;
   }
   const access = await conversation.external((c) => checkWishlistAccess(c, item.wishlistId, false));
   if (!access) return;
 
-  await ctx.reply(EDIT_FIELD_PROMPT[field]);
+  await ctx.reply(t.item.fieldPrompt[field]);
 
   if (field === "quantity") {
     const reservedCount = await conversation.external(() =>
@@ -266,28 +253,28 @@ export async function editItemFieldConversation(
     let quantity: number;
     while (true) {
       const q = await conversation.form.int({
-        otherwise: (c) => c.reply("Будь ласка, надішліть ціле число."),
+        otherwise: (c) => c.reply(t.item.askQuantityIntegerOnly),
       });
       if (q < reserved) {
-        await ctx.reply(`Уже заброньовано ${reserved} од. Кількість не може бути меншою.`);
+        await ctx.reply(t.item.quantityAlreadyReserved(reserved));
         continue;
       }
       if (q < 1) {
-        await ctx.reply("Кількість має бути щонайменше 1.");
+        await ctx.reply(t.item.quantityMinOne);
         continue;
       }
       quantity = q;
       break;
     }
     await conversation.external(() => prisma.wishlistItem.update({ where: { id: itemId }, data: { quantity } }));
-    await ctx.reply("✅ Кількість оновлено.");
+    await ctx.reply(t.item.quantityUpdated);
   } else {
     const raw = await conversation.form.text();
     const value = field === "title" ? raw.trim() : parseSkippable(raw);
     await conversation.external(() =>
       prisma.wishlistItem.update({ where: { id: itemId }, data: { [field]: value } }),
     );
-    await ctx.reply("✅ Оновлено.");
+    await ctx.reply(t.item.updated);
   }
 
   await renderWishlistManagement(ctx, item.wishlistId);
@@ -302,21 +289,21 @@ export function registerItems(bot: Bot<MyContext>) {
   bot.callbackQuery(/^item:edit:([^:]+)$/, async (ctx) => {
     const item = await prisma.wishlistItem.findUnique({ where: { id: ctx.match[1] } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
     if (!access) return;
     await ctx.answerCallbackQuery();
-    await ctx.reply("Що саме змінити?", {
+    await ctx.reply(t.item.askWhatToEdit, {
       reply_markup: new InlineKeyboard()
-        .text("Назву", `item:field:title:${item.id}`)
-        .text("Посилання", `item:field:url:${item.id}`)
+        .text(t.buttons.fieldTitle, `item:field:title:${item.id}`)
+        .text(t.buttons.fieldUrl, `item:field:url:${item.id}`)
         .row()
-        .text("Ціну", `item:field:price:${item.id}`)
-        .text("Магазин", `item:field:store:${item.id}`)
+        .text(t.buttons.fieldPrice, `item:field:price:${item.id}`)
+        .text(t.buttons.fieldStore, `item:field:store:${item.id}`)
         .row()
-        .text("Коментар", `item:field:comment:${item.id}`),
+        .text(t.buttons.fieldComment, `item:field:comment:${item.id}`),
     });
   });
 
@@ -333,13 +320,13 @@ export function registerItems(bot: Bot<MyContext>) {
   bot.callbackQuery(/^item:priority:([^:]+)$/, async (ctx) => {
     const item = await prisma.wishlistItem.findUnique({ where: { id: ctx.match[1] } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
     if (!access) return;
     await ctx.answerCallbackQuery();
-    await ctx.reply("Наскільки сильно хочете цей подарунок?", {
+    await ctx.reply(t.item.askPriorityChange, {
       reply_markup: priorityKeyboard(`item:priority:set:${item.id}`),
     });
   });
@@ -349,14 +336,14 @@ export function registerItems(bot: Bot<MyContext>) {
     const priority = ctx.match[2] as Priority;
     const item = await prisma.wishlistItem.findUnique({ where: { id: itemId } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
     if (!access) return;
     await ctx.answerCallbackQuery();
     await prisma.wishlistItem.update({ where: { id: itemId }, data: { priority } });
-    await ctx.reply("✅ Пріоритет оновлено.");
+    await ctx.reply(t.item.priorityUpdated);
     await renderWishlistManagement(ctx, item.wishlistId);
   });
 
@@ -365,7 +352,7 @@ export function registerItems(bot: Bot<MyContext>) {
     const itemId = ctx.match[2];
     const item = await prisma.wishlistItem.findUnique({ where: { id: itemId } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
@@ -397,7 +384,7 @@ export function registerItems(bot: Bot<MyContext>) {
   bot.callbackQuery(/^item:delete:([^:]+)$/, async (ctx) => {
     const item = await prisma.wishlistItem.findUnique({ where: { id: ctx.match[1] } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
@@ -408,21 +395,19 @@ export function registerItems(bot: Bot<MyContext>) {
       where: { itemId: item.id, status: "ACTIVE" },
     });
     const warning =
-      activeReservationsCount > 0
-        ? `\n\nЦей подарунок уже забронювали (${activeReservationsCount}). Після видалення вони отримають сповіщення.`
-        : "";
+      activeReservationsCount > 0 ? t.item.deleteReservedWarning(activeReservationsCount) : "";
 
-    await ctx.reply(`Видалити «${item.title}»?${warning}`, {
+    await ctx.reply(t.item.confirmDelete(item.title, warning), {
       reply_markup: new InlineKeyboard()
-        .text("Все одно видалити", `item:delete:confirm:${item.id}`)
-        .text("Скасувати", `item:back:${item.wishlistId}`),
+        .text(t.buttons.confirmDelete, `item:delete:confirm:${item.id}`)
+        .text(t.buttons.cancel, `item:back:${item.wishlistId}`),
     });
   });
 
   bot.callbackQuery(/^item:delete:confirm:([^:]+)$/, async (ctx) => {
     const item = await prisma.wishlistItem.findUnique({ where: { id: ctx.match[1] } });
     if (!item) {
-      await ctx.answerCallbackQuery({ text: "Товар не знайдено", show_alert: true });
+      await ctx.answerCallbackQuery({ text: t.item.notFoundAlert, show_alert: true });
       return;
     }
     const access = await checkWishlistAccess(ctx, item.wishlistId, false);
@@ -444,7 +429,7 @@ export function registerItems(bot: Bot<MyContext>) {
       });
     }
 
-    await ctx.reply(`🗑 «${item.title}» видалено.`);
+    await ctx.reply(t.item.deleted(item.title));
     await renderWishlistManagement(ctx, item.wishlistId);
   });
 

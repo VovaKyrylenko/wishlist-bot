@@ -5,6 +5,7 @@ import { upsertUserFromCtx } from "../lib/users.js";
 import { computeAvailability } from "../lib/availability.js";
 import { escapeHtml, formatDate, PRIORITY_ICON, PRIORITY_ORDER } from "../lib/format.js";
 import { buildListDeepLink } from "../lib/deeplink.js";
+import { t } from "../text.js";
 
 type GuestFilter = "all" | "available" | "reserved";
 
@@ -17,7 +18,7 @@ function availabilityRank(isFull: boolean, isPartial: boolean): number {
 export async function openWishlistForGuest(ctx: MyContext, slug: string) {
   const wishlist = await prisma.wishlist.findUnique({ where: { slug } });
   if (!wishlist) {
-    await ctx.reply("Список не знайдено. Можливо, посилання застаріло.");
+    await ctx.reply(t.guest.listNotFound);
     return;
   }
   await showWishlistIntro(ctx, wishlist.id);
@@ -29,7 +30,7 @@ async function showWishlistIntro(ctx: MyContext, wishlistId: string) {
     include: { items: { where: { status: "ACTIVE" } } },
   });
   if (!wishlist) {
-    await ctx.reply("Список не знайдено.");
+    await ctx.reply(t.guest.listNotFound);
     return;
   }
 
@@ -43,31 +44,31 @@ async function showWishlistIntro(ctx: MyContext, wishlistId: string) {
     wishlist.description ? escapeHtml(wishlist.description) : null,
     wishlist.eventDate ? `📅 ${formatDate(wishlist.eventDate)}` : null,
     "",
-    `${wishlist.items.length} бажань`,
-    wishlist.status === "ARCHIVED" ? "\n📦 Список закрито власником — нові бронювання не приймаються." : null,
+    t.wishlist.itemCount(wishlist.items.length),
+    wishlist.status === "ARCHIVED" ? t.guest.archivedNotice : null,
   ].filter((l) => l !== null);
 
-  const kb = new InlineKeyboard().text("🎁 Переглянути подарунки", `g:items:${wishlistId}:all`).row();
+  const kb = new InlineKeyboard().text(t.buttons.viewGifts, `g:items:${wishlistId}:all`).row();
   if (subscription) {
-    kb.text("🔕 Відписатися", `unsub:${wishlistId}`);
+    kb.text(t.buttons.unsubscribe, `unsub:${wishlistId}`);
   } else {
-    kb.text("🔔 Підписатися на оновлення", `sub:${wishlistId}`);
+    kb.text(t.buttons.subscribe, `sub:${wishlistId}`);
   }
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML", reply_markup: kb });
 
   const me = await ctx.api.getMe();
   const link = buildListDeepLink(me.username, wishlist.slug);
-  const shareText = `🎁 Вішліст «${wishlist.title}»\n\n${link}`;
-  await ctx.reply("Поділитися цим списком:", {
-    reply_markup: new InlineKeyboard().switchInline("📤 Поділитися списком", shareText),
+  const shareText = t.wishlist.shareMessage(wishlist.title, link);
+  await ctx.reply(t.guest.shareThisListPrompt, {
+    reply_markup: new InlineKeyboard().switchInline(t.buttons.shareThisList, shareText),
   });
 }
 
 async function showItems(ctx: MyContext, wishlistId: string, filter: GuestFilter) {
   const wishlist = await prisma.wishlist.findUnique({ where: { id: wishlistId } });
   if (!wishlist) {
-    await ctx.answerCallbackQuery({ text: "Список не знайдено", show_alert: true });
+    await ctx.answerCallbackQuery({ text: t.common.notFoundAlert, show_alert: true });
     return;
   }
   await ctx.answerCallbackQuery();
@@ -98,14 +99,20 @@ async function showItems(ctx: MyContext, wishlistId: string, filter: GuestFilter
   });
 
   const filterKb = new InlineKeyboard()
-    .text(filter === "all" ? "• Усі" : "Усі", `g:items:${wishlistId}:all`)
-    .text(filter === "available" ? "• Доступні" : "Доступні", `g:items:${wishlistId}:available`)
-    .text(filter === "reserved" ? "• Заброньовані" : "Заброньовані", `g:items:${wishlistId}:reserved`);
+    .text(filter === "all" ? `• ${t.buttons.filterAll}` : t.buttons.filterAll, `g:items:${wishlistId}:all`)
+    .text(
+      filter === "available" ? `• ${t.buttons.filterAvailable}` : t.buttons.filterAvailable,
+      `g:items:${wishlistId}:available`,
+    )
+    .text(
+      filter === "reserved" ? `• ${t.buttons.filterReserved}` : t.buttons.filterReserved,
+      `g:items:${wishlistId}:reserved`,
+    );
 
-  await ctx.reply(`🎁 ${wishlist.title} — ${filtered.length} бажань`, { reply_markup: filterKb });
+  await ctx.reply(t.guest.listHeader(wishlist.title, filtered.length), { reply_markup: filterKb });
 
   if (filtered.length === 0) {
-    await ctx.reply("Тут поки що порожньо.");
+    await ctx.reply(t.guest.empty);
     return;
   }
 
@@ -116,17 +123,17 @@ async function showItems(ctx: MyContext, wishlistId: string, filter: GuestFilter
       item.price ? escapeHtml(item.price) : null,
       item.store ? escapeHtml(item.store) : null,
       a.isFull
-        ? "✅ Уже заброньовано"
+        ? t.item.fullyReserved
         : a.reserved > 0
-          ? `Потрібно: ${item.quantity}\nЗаброньовано: ${a.reserved}\nЗалишилось: ${a.available}`
-          : `Потрібно: ${item.quantity}\nСтатус: доступно`,
+          ? t.item.availabilityDetail(item.quantity, a.reserved, a.available)
+          : t.item.availableStatus(item.quantity),
       item.comment ? `\n${escapeHtml(item.comment)}` : null,
     ].filter((l) => l !== null);
 
     const kb = new InlineKeyboard();
-    if (item.url) kb.url("🔗 Відкрити посилання", item.url).row();
+    if (item.url) kb.url(t.buttons.openLink, item.url).row();
     if (wishlist.status === "ACTIVE" && !a.isFull) {
-      kb.text("🎁 Забронювати", `g:reserve:${item.id}`);
+      kb.text(t.buttons.reserve, `g:reserve:${item.id}`);
     }
 
     await ctx.reply(lines.join("\n"), {

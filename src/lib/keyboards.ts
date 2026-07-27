@@ -1,10 +1,11 @@
 import { Keyboard } from "grammy";
+import { t } from "../text.js";
 
-export const MENU_CREATE = "➕ Створити вішліст";
-export const MENU_LISTS = "📋 Мої вішлісти";
-export const MENU_RESERVATIONS = "🎁 Мої бронювання";
-export const MENU_SUBSCRIPTIONS = "🔔 Підписки";
-export const MENU_SETTINGS = "⚙️ Налаштування";
+export const MENU_CREATE = t.buttons.menuCreate;
+export const MENU_LISTS = t.buttons.menuMyLists;
+export const MENU_RESERVATIONS = t.buttons.menuMyReservations;
+export const MENU_SUBSCRIPTIONS = t.buttons.menuSubscriptions;
+export const MENU_SETTINGS = t.buttons.menuSettings;
 
 export function mainMenuKeyboard(): Keyboard {
   return new Keyboard()

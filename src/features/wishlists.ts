@@ -9,12 +9,11 @@ import { computeAvailability } from "../lib/availability.js";
 import { notifyGuestListArchived, notifyGuestListDeleted } from "../lib/notify.js";
 import { checkWishlistAccess } from "../lib/access.js";
 import { renderWishlistManagement } from "./items.js";
-
-const SKIP = "-";
+import { t } from "../text.js";
 
 function parseSkippable(raw: string): string | null {
-  const t = raw.trim();
-  return t === SKIP || t.length === 0 ? null : t;
+  const v = raw.trim();
+  return v === t.common.skip || v.length === 0 ? null : v;
 }
 
 function parseUaDate(raw: string): Date | null {
@@ -31,16 +30,16 @@ function parseUaDate(raw: string): Date | null {
 /** Used only inside createWishlistConversation, where no wishlist id exists yet. */
 function privacyKeyboardForCreate(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("🎁 Сюрприз", "privacy:SURPRISE")
+    .text(t.buttons.privacySurprise, "privacy:SURPRISE")
     .row()
-    .text("👀 Відкритий", "privacy:OPEN");
+    .text(t.buttons.privacyOpen, "privacy:OPEN");
 }
 
 function privacyKeyboardForEdit(wishlistId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text("🎁 Сюрприз", `wl:privacy:set:${wishlistId}:SURPRISE`)
+    .text(t.buttons.privacySurprise, `wl:privacy:set:${wishlistId}:SURPRISE`)
     .row()
-    .text("👀 Відкритий", `wl:privacy:set:${wishlistId}:OPEN`);
+    .text(t.buttons.privacyOpen, `wl:privacy:set:${wishlistId}:OPEN`);
 }
 
 const assertAccess = checkWishlistAccess;
@@ -61,11 +60,11 @@ export async function showMyWishlists(ctx: MyContext) {
   });
 
   if (wishlists.length === 0) {
-    await ctx.reply("У вас ще немає жодного вішліста. Натисніть «➕ Створити вішліст», щоб почати.");
+    await ctx.reply(t.wishlist.noneYet);
     return;
   }
 
-  await ctx.reply(`📋 Ваші вішлісти (${wishlists.length})`);
+  await ctx.reply(t.wishlist.yourLists(wishlists.length));
 
   for (const wl of wishlists) {
     let full = 0;
@@ -79,41 +78,36 @@ export async function showMyWishlists(ctx: MyContext) {
     const lines = [
       `${wl.status === "ARCHIVED" ? "📦" : "🎁"} <b>${escapeHtml(wl.title)}</b>`,
       wl.eventDate ? `📅 ${formatDate(wl.eventDate)}` : null,
-      `${wl.items.length} бажань`,
-      full > 0 ? `${full} повністю заброньовано` : null,
-      partial > 0 ? `${partial} частково заброньовано` : null,
-      wl.status === "ARCHIVED" ? "Список в архіві" : null,
+      t.wishlist.itemCount(wl.items.length),
+      full > 0 ? t.wishlist.fullyReservedCount(full) : null,
+      partial > 0 ? t.wishlist.partiallyReservedCount(partial) : null,
+      wl.status === "ARCHIVED" ? t.wishlist.archivedTag : null,
     ].filter((l) => l !== null);
 
-    const kb = new InlineKeyboard().text("Відкрити", `wl:open:${wl.id}`);
-    if (wl.status === "ACTIVE") kb.text("Поділитися", `wl:share:${wl.id}`);
-    kb.row().text("⚙️ Налаштування", `wl:settings:${wl.id}`);
+    const kb = new InlineKeyboard().text(t.buttons.open, `wl:open:${wl.id}`);
+    if (wl.status === "ACTIVE") kb.text(t.buttons.share, `wl:share:${wl.id}`);
+    kb.row().text(t.buttons.settings, `wl:settings:${wl.id}`);
 
     await ctx.reply(lines.join("\n"), { parse_mode: "HTML", reply_markup: kb });
   }
 }
 
 export async function createWishlistConversation(conversation: MyConversation, ctx: MyContext) {
-  await ctx.reply("Введіть назву списку (наприклад: «День народження Володимира»):");
+  await ctx.reply(t.wishlist.askTitle);
   const title = await conversation.form.text();
 
-  await ctx.reply("Додайте короткий опис (необов'язково). Надішліть «-», щоб пропустити.");
+  await ctx.reply(t.wishlist.askDescription);
   const description = parseSkippable(await conversation.form.text());
 
-  await ctx.reply(
-    "Вкажіть дату події у форматі ДД.ММ.РРРР (необов'язково). Надішліть «-», щоб пропустити.",
-  );
+  await ctx.reply(t.wishlist.askDate);
   let eventDate: Date | null = null;
   const dateRaw = parseSkippable(await conversation.form.text());
   if (dateRaw) {
     eventDate = parseUaDate(dateRaw);
-    if (!eventDate) await ctx.reply("Не вдалося розпізнати дату — продовжую без неї.");
+    if (!eventDate) await ctx.reply(t.wishlist.dateNotRecognizedContinuing);
   }
 
-  await ctx.reply(
-    "Чи бачитимете ви деталі бронювань? У режимі «Сюрприз» ви не побачите, хто і що саме забронював.",
-    { reply_markup: privacyKeyboardForCreate() },
-  );
+  await ctx.reply(t.wishlist.askPrivacy, { reply_markup: privacyKeyboardForCreate() });
   const privacyCtx = await conversation.waitForCallbackQuery(["privacy:SURPRISE", "privacy:OPEN"]);
   await privacyCtx.answerCallbackQuery();
   const privacyMode = privacyCtx.callbackQuery.data === "privacy:OPEN" ? "OPEN" : "SURPRISE";
@@ -128,15 +122,12 @@ export async function createWishlistConversation(conversation: MyConversation, c
   const me = await conversation.external((c) => c.api.getMe());
   const link = buildListDeepLink(me.username, wishlist.slug);
 
-  await ctx.reply(
-    `✅ Список «${escapeHtml(title)}» створено!\n\nПосилання для друзів:\n${link}\n\nНадішліть його друзям або одразу додайте перше бажання.`,
-    {
-      reply_markup: new InlineKeyboard()
-        .text("➕ Додати бажання", `item:add:${wishlist.id}`)
-        .row()
-        .text("📋 Мої вішлісти", "wl:list"),
-    },
-  );
+  await ctx.reply(t.wishlist.created(escapeHtml(title), link), {
+    reply_markup: new InlineKeyboard()
+      .text(t.buttons.addItem, `item:add:${wishlist.id}`)
+      .row()
+      .text(t.buttons.menuMyLists, "wl:list"),
+  });
 }
 
 async function showSettings(ctx: MyContext, wishlistId: string) {
@@ -146,30 +137,30 @@ async function showSettings(ctx: MyContext, wishlistId: string) {
   if (ctx.callbackQuery) await ctx.answerCallbackQuery();
 
   const lines = [
-    `⚙️ Налаштування «${escapeHtml(wishlist.title)}»`,
+    t.wishlist.settingsTitle(escapeHtml(wishlist.title)),
     "",
-    wishlist.description ? escapeHtml(wishlist.description) : "(без опису)",
-    wishlist.eventDate ? `📅 ${formatDate(wishlist.eventDate)}` : "(дата не вказана)",
+    wishlist.description ? escapeHtml(wishlist.description) : t.wishlist.noDescription,
+    wishlist.eventDate ? `📅 ${formatDate(wishlist.eventDate)}` : t.wishlist.noDate,
     PRIVACY_LABEL[wishlist.privacyMode],
   ];
 
   const kb = new InlineKeyboard()
-    .text("✏️ Змінити назву", `wl:field:title:${wishlist.id}`)
-    .text("📝 Змінити опис", `wl:field:description:${wishlist.id}`)
+    .text(t.buttons.editTitle, `wl:field:title:${wishlist.id}`)
+    .text(t.buttons.editDescription, `wl:field:description:${wishlist.id}`)
     .row()
-    .text("📅 Змінити дату", `wl:field:eventDate:${wishlist.id}`)
-    .text("🔒 Приватність", `wl:privacy:${wishlist.id}`)
+    .text(t.buttons.editDate, `wl:field:eventDate:${wishlist.id}`)
+    .text(t.buttons.privacy, `wl:privacy:${wishlist.id}`)
     .row()
-    .text("👥 Додати редактора", `wl:addeditor:${wishlist.id}`)
+    .text(t.buttons.addEditor, `wl:addeditor:${wishlist.id}`)
     .row();
 
   if (wishlist.status === "ACTIVE") {
-    kb.text("📦 Архівувати", `wl:archive:${wishlist.id}`).text("📄 Копія", `wl:duplicate:${wishlist.id}`);
+    kb.text(t.buttons.archive, `wl:archive:${wishlist.id}`).text(t.buttons.duplicate, `wl:duplicate:${wishlist.id}`);
   } else {
-    kb.text("♻️ Розархівувати", `wl:unarchive:${wishlist.id}`).text("📄 Копія", `wl:duplicate:${wishlist.id}`);
+    kb.text(t.buttons.unarchive, `wl:unarchive:${wishlist.id}`).text(t.buttons.duplicate, `wl:duplicate:${wishlist.id}`);
   }
-  kb.row().text("🗑 Видалити список", `wl:delete:${wishlist.id}`);
-  kb.row().text("⬅️ Назад до списку", `wl:open:${wishlist.id}`);
+  kb.row().text(t.buttons.deleteList, `wl:delete:${wishlist.id}`);
+  kb.row().text(t.buttons.backToList, `wl:open:${wishlist.id}`);
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML", reply_markup: kb });
 }
@@ -184,30 +175,30 @@ export async function editWishlistFieldConversation(
   if (!access) return;
 
   if (field === "title") {
-    await ctx.reply("Введіть нову назву списку:");
+    await ctx.reply(t.wishlist.askNewTitle);
     const title = await conversation.form.text();
     await conversation.external(() => prisma.wishlist.update({ where: { id: wishlistId }, data: { title } }));
-    await ctx.reply("✅ Назву оновлено.");
+    await ctx.reply(t.wishlist.titleUpdated);
   } else if (field === "description") {
-    await ctx.reply("Введіть новий опис. Надішліть «-», щоб прибрати опис.");
+    await ctx.reply(t.wishlist.askNewDescription);
     const description = parseSkippable(await conversation.form.text());
     await conversation.external(() =>
       prisma.wishlist.update({ where: { id: wishlistId }, data: { description } }),
     );
-    await ctx.reply("✅ Опис оновлено.");
+    await ctx.reply(t.wishlist.descriptionUpdated);
   } else {
-    await ctx.reply("Введіть нову дату у форматі ДД.ММ.РРРР. Надішліть «-», щоб прибрати дату.");
+    await ctx.reply(t.wishlist.askNewDate);
     const raw = parseSkippable(await conversation.form.text());
     let eventDate: Date | null = null;
     if (raw) {
       eventDate = parseUaDate(raw);
       if (!eventDate) {
-        await ctx.reply("Не вдалося розпізнати дату, спробуйте ще раз у форматі ДД.ММ.РРРР.");
+        await ctx.reply(t.wishlist.dateNotRecognizedRetry);
         return;
       }
     }
     await conversation.external(() => prisma.wishlist.update({ where: { id: wishlistId }, data: { eventDate } }));
-    await ctx.reply("✅ Дату оновлено.");
+    await ctx.reply(t.wishlist.dateUpdated);
   }
 
   await showSettings(ctx, wishlistId);
@@ -217,9 +208,7 @@ export async function addEditorConversation(conversation: MyConversation, ctx: M
   const access = await conversation.external((c) => assertAccess(c, wishlistId, true));
   if (!access) return;
 
-  await ctx.reply(
-    "Надішліть юзернейм редактора у форматі @username (людина повинна мати публічний юзернейм у Telegram).",
-  );
+  await ctx.reply(t.wishlist.askEditorUsername);
   const raw = await conversation.form.text();
   const username = raw.trim().replace(/^@/, "");
 
@@ -232,7 +221,7 @@ export async function addEditorConversation(conversation: MyConversation, ctx: M
   });
 
   if (!chat || !("id" in chat)) {
-    await ctx.reply("Не вдалося знайти цього користувача. Перевірте юзернейм і спробуйте ще раз.");
+    await ctx.reply(t.wishlist.editorNotFound);
     return;
   }
 
@@ -257,7 +246,7 @@ export async function addEditorConversation(conversation: MyConversation, ctx: M
     }),
   );
 
-  await ctx.reply(`✅ @${username} тепер може редагувати цей список.`);
+  await ctx.reply(t.wishlist.editorAdded(username));
   await showSettings(ctx, wishlistId);
 }
 
@@ -278,15 +267,9 @@ export function registerWishlists(bot: Bot<MyContext>) {
     await ctx.answerCallbackQuery();
     const me = await ctx.api.getMe();
     const link = buildListDeepLink(me.username, access.wishlist.slug);
-    const text = [
-      `🎁 Мій вішліст «${access.wishlist.title}»`,
-      "",
-      "Тут можна переглянути побажання та забронювати подарунок, щоб уникнути повторів:",
-      "",
-      link,
-    ].join("\n");
+    const text = t.wishlist.shareMessage(access.wishlist.title, link);
     await ctx.reply(text, {
-      reply_markup: new InlineKeyboard().switchInline("Надіслати другу", text),
+      reply_markup: new InlineKeyboard().switchInline(t.buttons.sendToFriend, text),
     });
   });
 
@@ -301,7 +284,7 @@ export function registerWishlists(bot: Bot<MyContext>) {
     const access = await assertAccess(ctx, ctx.match[1], true);
     if (!access) return;
     await ctx.answerCallbackQuery();
-    await ctx.reply("Оберіть режим приватності бронювань:", {
+    await ctx.reply(t.wishlist.askPrivacyMode, {
       reply_markup: privacyKeyboardForEdit(access.wishlist.id),
     });
   });
@@ -313,7 +296,7 @@ export function registerWishlists(bot: Bot<MyContext>) {
     if (!access) return;
     await ctx.answerCallbackQuery();
     await prisma.wishlist.update({ where: { id: wishlistId }, data: { privacyMode: mode } });
-    await ctx.reply(`✅ ${PRIVACY_LABEL[mode]}`);
+    await ctx.reply(t.wishlist.privacyUpdated(PRIVACY_LABEL[mode]));
     await showSettings(ctx, wishlistId);
   });
 
@@ -326,14 +309,11 @@ export function registerWishlists(bot: Bot<MyContext>) {
     const access = await assertAccess(ctx, ctx.match[1], true);
     if (!access) return;
     await ctx.answerCallbackQuery();
-    await ctx.reply(
-      `Архівувати «${access.wishlist.title}»? Список більше не прийматиме бронювань і сповіщень.`,
-      {
-        reply_markup: new InlineKeyboard()
-          .text("Так, архівувати", `wl:archive:confirm:${access.wishlist.id}`)
-          .text("Скасувати", `wl:settings:${access.wishlist.id}`),
-      },
-    );
+    await ctx.reply(t.wishlist.confirmArchive(access.wishlist.title), {
+      reply_markup: new InlineKeyboard()
+        .text(t.buttons.confirmArchive, `wl:archive:confirm:${access.wishlist.id}`)
+        .text(t.buttons.cancel, `wl:settings:${access.wishlist.id}`),
+    });
   });
 
   bot.callbackQuery(/^wl:archive:confirm:([^:]+)$/, async (ctx) => {
@@ -358,7 +338,7 @@ export function registerWishlists(bot: Bot<MyContext>) {
       });
     }
 
-    await ctx.reply("📦 Список переміщено в архів.");
+    await ctx.reply(t.wishlist.archived);
     await showSettings(ctx, wishlist.id);
   });
 
@@ -367,7 +347,7 @@ export function registerWishlists(bot: Bot<MyContext>) {
     if (!access) return;
     await ctx.answerCallbackQuery();
     await prisma.wishlist.update({ where: { id: access.wishlist.id }, data: { status: "ACTIVE" } });
-    await ctx.reply("♻️ Список знову активний.");
+    await ctx.reply(t.wishlist.unarchived);
     await showSettings(ctx, access.wishlist.id);
   });
 
@@ -408,12 +388,9 @@ export function registerWishlists(bot: Bot<MyContext>) {
 
     const me = await ctx.api.getMe();
     const link = buildListDeepLink(me.username, copy.slug);
-    await ctx.reply(
-      `📄 Створено копію «${copy.title}» (${items.length} бажань, без бронювань і підписників).\n\n${link}`,
-      {
-        reply_markup: new InlineKeyboard().text("⚙️ Налаштування", `wl:settings:${copy.id}`),
-      },
-    );
+    await ctx.reply(t.wishlist.duplicated(copy.title, items.length, link), {
+      reply_markup: new InlineKeyboard().text(t.buttons.settings, `wl:settings:${copy.id}`),
+    });
   });
 
   bot.callbackQuery(/^wl:delete:([^:]+)$/, async (ctx) => {
@@ -426,14 +403,12 @@ export function registerWishlists(bot: Bot<MyContext>) {
     });
 
     const warning =
-      activeReservationsCount > 0
-        ? `\n\n⚠️ У цьому списку є ${activeReservationsCount} активних бронювань. Після видалення гості отримають сповіщення.`
-        : "";
+      activeReservationsCount > 0 ? t.wishlist.deleteActiveReservationsWarning(activeReservationsCount) : "";
 
-    await ctx.reply(`Видалити список «${access.wishlist.title}» назавжди?${warning}`, {
+    await ctx.reply(t.wishlist.confirmDelete(access.wishlist.title, warning), {
       reply_markup: new InlineKeyboard()
-        .text("Все одно видалити", `wl:delete:confirm:${access.wishlist.id}`)
-        .text("Скасувати", `wl:settings:${access.wishlist.id}`),
+        .text(t.buttons.confirmDelete, `wl:delete:confirm:${access.wishlist.id}`)
+        .text(t.buttons.cancel, `wl:settings:${access.wishlist.id}`),
     });
   });
 
@@ -458,6 +433,6 @@ export function registerWishlists(bot: Bot<MyContext>) {
       });
     }
 
-    await ctx.reply(`🗑 Список «${title}» видалено.`);
+    await ctx.reply(t.wishlist.deleted(title));
   });
 }

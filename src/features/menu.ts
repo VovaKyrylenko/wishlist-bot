@@ -14,14 +14,7 @@ import { openWishlistForGuest } from "./guest.js";
 import { showMyWishlists } from "./wishlists.js";
 import { showMyReservations } from "./reservations.js";
 import { showMySubscriptions } from "./subscriptions.js";
-
-const WELCOME = [
-  "🎁 Вітаю у Wishlist-боті!",
-  "",
-  "Тут можна за секунди створити список бажань і надіслати посилання друзям — вони зможуть забронювати подарунок, щоб уникнути повторів.",
-  "",
-  "Жодної реєстрації. Усе відбувається прямо тут, у Telegram.",
-].join("\n");
+import { t } from "../text.js";
 
 export function registerMenu(bot: Bot<MyContext>) {
   bot.command("start", async (ctx) => {
@@ -33,7 +26,7 @@ export function registerMenu(bot: Bot<MyContext>) {
       return;
     }
 
-    await ctx.reply(WELCOME, { reply_markup: mainMenuKeyboard() });
+    await ctx.reply(t.menu.welcome, { reply_markup: mainMenuKeyboard() });
   });
 
   bot.hears(MENU_CREATE, async (ctx) => {
@@ -60,12 +53,12 @@ export function registerMenu(bot: Bot<MyContext>) {
     const user = await upsertUserFromCtx(ctx);
     await ctx.reply(
       [
-        "⚙️ Налаштування",
+        t.menu.settingsHeader,
         "",
-        `Ваш Telegram ID: ${user.telegramId}`,
-        user.username ? `Юзернейм: @${user.username}` : null,
+        t.menu.settingsTelegramId(user.telegramId),
+        user.username ? t.menu.settingsUsername(user.username) : null,
         "",
-        "Приватність бронювань і сповіщення налаштовуються окремо для кожного вішліста — відкрийте список → «Налаштування».",
+        t.menu.settingsHint,
       ]
         .filter((line) => line !== null)
         .join("\n"),
@@ -73,6 +66,6 @@ export function registerMenu(bot: Bot<MyContext>) {
   });
 
   bot.command("menu", async (ctx) => {
-    await ctx.reply("Головне меню:", { reply_markup: mainMenuKeyboard() });
+    await ctx.reply(t.menu.mainMenu, { reply_markup: mainMenuKeyboard() });
   });
 }

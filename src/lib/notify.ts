@@ -1,6 +1,7 @@
 import type { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../context.js";
 import { escapeHtml } from "./format.js";
+import { t } from "../text.js";
 
 type BotApi = Bot<MyContext>["api"];
 
@@ -35,19 +36,18 @@ export async function notifyOwnerNewReservation(
 ) {
   const list = escapeHtml(opts.wishlistTitle);
   if (opts.privacyMode === "SURPRISE") {
-    await safeSend(
-      api,
-      opts.ownerTelegramId,
-      `✅ У вашому вішлісті «${list}» з'явилося нове бронювання.`,
-    );
+    await safeSend(api, opts.ownerTelegramId, t.notify.ownerNewReservationSurprise(list));
     return;
   }
-  const item = escapeHtml(opts.itemTitle);
-  const guest = escapeHtml(opts.guestName);
   await safeSend(
     api,
     opts.ownerTelegramId,
-    `✅ Нове бронювання у «${list}»\n\n🎁 ${item}\nКількість: ${opts.reservedQuantity}\nЗабронював(ла): ${guest}`,
+    t.notify.ownerNewReservationOpen(
+      list,
+      escapeHtml(opts.itemTitle),
+      opts.reservedQuantity,
+      escapeHtml(opts.guestName),
+    ),
   );
 }
 
@@ -57,11 +57,10 @@ export async function notifyOwnerReservationCancelled(
 ) {
   const list = escapeHtml(opts.wishlistTitle);
   if (opts.privacyMode === "SURPRISE") {
-    await safeSend(api, opts.ownerTelegramId, `↩️ У вішлісті «${list}» хтось скасував бронювання.`);
+    await safeSend(api, opts.ownerTelegramId, t.notify.ownerCancelledSurprise(list));
     return;
   }
-  const item = escapeHtml(opts.itemTitle);
-  await safeSend(api, opts.ownerTelegramId, `↩️ Скасовано бронювання у «${list}»\n\n🎁 ${item}`);
+  await safeSend(api, opts.ownerTelegramId, t.notify.ownerCancelledOpen(list, escapeHtml(opts.itemTitle)));
 }
 
 export async function notifySubscribers(
@@ -82,9 +81,7 @@ export async function notifyGuestItemRemoved(
   await safeSend(
     api,
     opts.guestTelegramId,
-    `⚠️ Власник видалив подарунок «${escapeHtml(opts.itemTitle)}» зі списку «${escapeHtml(
-      opts.wishlistTitle,
-    )}», який ви бронювали. Ваше бронювання скасовано.`,
+    t.notify.itemRemoved(escapeHtml(opts.wishlistTitle), escapeHtml(opts.itemTitle)),
   );
 }
 
@@ -92,20 +89,12 @@ export async function notifyGuestListDeleted(
   api: BotApi,
   opts: { guestTelegramId: string; wishlistTitle: string },
 ) {
-  await safeSend(
-    api,
-    opts.guestTelegramId,
-    `🗑 Власник видалив список «${escapeHtml(opts.wishlistTitle)}». Ваше бронювання в ньому більше не активне.`,
-  );
+  await safeSend(api, opts.guestTelegramId, t.notify.listDeleted(escapeHtml(opts.wishlistTitle)));
 }
 
 export async function notifyGuestListArchived(
   api: BotApi,
   opts: { guestTelegramId: string; wishlistTitle: string },
 ) {
-  await safeSend(
-    api,
-    opts.guestTelegramId,
-    `📦 Список «${escapeHtml(opts.wishlistTitle)}» закрито власником. Нові бронювання більше не приймаються.`,
-  );
+  await safeSend(api, opts.guestTelegramId, t.notify.listArchived(escapeHtml(opts.wishlistTitle)));
 }
