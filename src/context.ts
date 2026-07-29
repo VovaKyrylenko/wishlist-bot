@@ -1,12 +1,18 @@
 import type { Context } from "grammy";
-import type { Conversation, ConversationFlavor } from "@grammyjs/conversations";
 
-export type GuestFilter = "all" | "available" | "reserved";
+// There is deliberately no session and no conversation plugin.
+//
+// The session's one job — remembering the guest's last-used filter — leaked
+// across wishlists, so a filter chosen on one friend's list quietly hid gifts
+// on the next. Navigation state now travels in the callback data of the screen
+// it belongs to.
+//
+// Conversations went the same way, for a bigger reason: a conversation owns
+// the next update, which is exactly what made every dialog a trap ("Спершу
+// заверши цей крок"). What the bot is waiting for now lives on the user as
+// `pendingAction` (see lib/pending.ts): a plain message answers the open
+// question, every button still does what it says, and the anchor always exits.
+export type MyContext = Context;
 
-// There is deliberately no session: the one thing it ever held — the guest's
-// last-used filter — leaked across wishlists, so a filter chosen on one
-// friend's list quietly hid gifts on the next. Filter and page now travel in
-// the callback data of the screen they belong to, which is where the rest of
-// the navigation state already lives.
-export type MyContext = ConversationFlavor<Context>;
-export type MyConversation = Conversation<MyContext, MyContext>;
+/** Whether the showcase is currently hiding gifts that are already taken. */
+export type TakenFilter = "all" | "free";

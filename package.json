@@ -16,11 +16,10 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "vercel-build": "prisma generate && prisma migrate deploy"
+    "vercel-build": "prisma generate && prisma migrate deploy",
+    "verify:flows": "tsx scripts/flows/run.ts"
   },
   "dependencies": {
-    "@grammyjs/conversations": "^2.1.1",
-    "@grammyjs/storage-prisma": "^2.6.0",
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.9.1",
     "@prisma/client": "^7.9.1",

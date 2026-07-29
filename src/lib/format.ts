@@ -1,4 +1,5 @@
 import type { Priority } from "../../generated/prisma/enums.js";
+import { daysUntil, todayUtc } from "./dates.js";
 import { t } from "../text.js";
 
 export function escapeHtml(text: string): string {
@@ -9,6 +10,7 @@ export function escapeHtml(text: string): string {
 }
 
 export const PRIORITY_ICON = t.labels.priorityIcon;
+export const PRIORITY_NAME = t.labels.priorityName;
 
 export const PRIORITY_ORDER: Record<Priority, number> = {
   HIGH: 0,
@@ -16,18 +18,63 @@ export const PRIORITY_ORDER: Record<Priority, number> = {
   LOW: 2,
 };
 
-export const PRIVACY_LABEL = t.labels.privacy;
+const DAY_MONTH = new Intl.DateTimeFormat("uk-UA", {
+  day: "numeric",
+  month: "long",
+  timeZone: "UTC",
+});
+const DAY_MONTH_YEAR = new Intl.DateTimeFormat("uk-UA", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
-export const RESERVATION_STATUS_LABEL = t.labels.reservationStatus;
-
-export function formatDate(date: Date | null): string {
-  if (!date) return "";
-  return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(date);
+/**
+ * "15 серпня" for this year, "15 серпня 2027 р." when the year matters.
+ * Spelling the year out on every date made every header longer for no gain —
+ * an event is almost always within the next few months.
+ */
+export function formatDate(date: Date): string {
+  const sameYear = date.getUTCFullYear() === todayUtc().getUTCFullYear();
+  return (sameYear ? DAY_MONTH : DAY_MONTH_YEAR).format(date);
 }
 
-export function formatGuestName(user: { firstName: string | null; lastName: string | null; username: string | null }): string {
+/**
+ * How far away the event is, in the words a person would use. Returns null
+ * when "далеко" is not worth saying (more than a season out), so headers stay
+ * short — §14.8.
+ */
+export function formatRelativeDate(date: Date): string | null {
+  const days = daysUntil(date);
+  if (days < 0) return "вже минула";
+  if (days === 0) return "сьогодні";
+  if (days === 1) return "завтра";
+  if (days === 2) return "післязавтра";
+  if (days <= 90) return `через ${t.plural.days(days)}`;
+  return null;
+}
+
+export function formatGuestName(user: {
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+}): string {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   if (name) return name;
   if (user.username) return `@${user.username}`;
   return t.common.guestFallbackName;
+}
+
+/**
+ * The owner's first name is what a guest reads at the top of a showcase
+ * ("Список бажань Марти"), so a surname would only make the header longer.
+ */
+export function formatOwnerName(user: {
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+}): string {
+  if (user.firstName?.trim()) return user.firstName.trim();
+  return formatGuestName(user);
 }

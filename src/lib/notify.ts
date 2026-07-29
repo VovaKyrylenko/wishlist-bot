@@ -1,17 +1,26 @@
-import { GrammyError, type Bot, type InlineKeyboard } from "grammy";
+// Outbound DMs.
+//
+// Every message an owner receives passes the surprise contract (§8.4): while
+// the surprise is on they learn that their list is alive and nothing else —
+// not which gift, not who, not how many. A notification is the easiest place
+// in the whole product to break that promise by accident, so the privacy
+// branch lives here rather than at each call site.
+
+import { GrammyError, InlineKeyboard, type Bot } from "grammy";
 import type { MyContext } from "../context.js";
 import { prisma } from "../db.js";
 import { escapeHtml } from "./format.js";
-import { truncateHtml } from "./ui.js";
+import { truncateHtml } from "./screen.js";
 import { t } from "../text.js";
 
 type BotApi = Bot<MyContext>["api"];
+type PrivacyMode = "SURPRISE" | "OPEN";
 
 const TEXT_LIMIT = 4096;
 
 /**
  * Telegram caps outgoing messages at roughly 30/s across all chats. Fan-outs
- * here (a digest to every subscriber, "list deleted" to every guest) used to
+ * here (a digest to every follower, "список видалено" to every guest) used to
  * fire as fast as the loop could go and got throttled — or 429'd — as soon as
  * a list had a real audience. One shared gate paces every send.
  */
@@ -34,8 +43,8 @@ function isPermanentlyUnreachable(err: unknown): boolean {
 
 /**
  * Someone who blocked the bot must stop receiving fan-outs, or every future
- * digest wastes a request on them forever. Their wishlists and reservations
- * stay untouched — only the push channels are dropped.
+ * digest wastes a request on them forever. Their lists and promises stay
+ * untouched — only the push channels are dropped.
  */
 async function forgetUnreachable(telegramId: string): Promise<void> {
   try {
@@ -75,96 +84,110 @@ export async function safeSend(
   }
 }
 
-export async function notifyOwnerNewReservation(
+// ── Власнику ───────────────────────────────────────────────────────────────
+
+export async function notifyOwnerNewPromise(
   api: BotApi,
   opts: {
     ownerTelegramId: string;
     wishlistTitle: string;
-    itemTitle: string;
-    privacyMode: "SURPRISE" | "OPEN";
-    reservedQuantity: number;
+    giftTitle: string;
+    privacyMode: PrivacyMode;
+    quantity: number;
     guestName: string;
-    guestContact: string | null;
   },
 ) {
   const list = escapeHtml(opts.wishlistTitle);
   if (opts.privacyMode === "SURPRISE") {
-    await safeSend(api, opts.ownerTelegramId, t.notify.ownerNewReservationSurprise(list));
+    await safeSend(api, opts.ownerTelegramId, t.notify.ownerPromiseSurprise(list));
     return;
   }
   await safeSend(
     api,
     opts.ownerTelegramId,
-    t.notify.ownerNewReservationOpen(
+    t.notify.ownerPromiseOpen(
       list,
-      escapeHtml(opts.itemTitle),
-      opts.reservedQuantity,
+      escapeHtml(opts.giftTitle),
       escapeHtml(opts.guestName),
-      opts.guestContact ? escapeHtml(opts.guestContact) : null,
+      opts.quantity,
     ),
   );
 }
 
-export async function notifyOwnerReservationCancelled(
+export async function notifyOwnerPromiseReleased(
   api: BotApi,
-  opts: { ownerTelegramId: string; wishlistTitle: string; itemTitle: string; privacyMode: "SURPRISE" | "OPEN" },
+  opts: { ownerTelegramId: string; wishlistTitle: string; giftTitle: string; privacyMode: PrivacyMode },
 ) {
   const list = escapeHtml(opts.wishlistTitle);
-  if (opts.privacyMode === "SURPRISE") {
-    await safeSend(api, opts.ownerTelegramId, t.notify.ownerCancelledSurprise(list));
-    return;
-  }
-  await safeSend(api, opts.ownerTelegramId, t.notify.ownerCancelledOpen(list, escapeHtml(opts.itemTitle)));
+  await safeSend(
+    api,
+    opts.ownerTelegramId,
+    opts.privacyMode === "SURPRISE"
+      ? t.notify.ownerReleasedSurprise(list)
+      : t.notify.ownerReleasedOpen(list, escapeHtml(opts.giftTitle)),
+  );
 }
 
 /**
- * A gift actually being bought is the one event an owner most wants to know
- * about, and until now nobody told them. Still respects SURPRISE: the fact
- * that *something* was bought is safe, naming it is not.
+ * A gift actually being bought is the event an owner most wants to hear about.
+ * Still surprise-safe: that *something* was bought is fine, naming it is not.
  */
-export async function notifyOwnerPurchased(
+export async function notifyOwnerGiftBought(
   api: BotApi,
   opts: {
     ownerTelegramId: string;
     wishlistTitle: string;
-    itemTitle: string;
-    privacyMode: "SURPRISE" | "OPEN";
+    giftTitle: string;
+    privacyMode: PrivacyMode;
     guestName: string;
   },
 ) {
   const list = escapeHtml(opts.wishlistTitle);
-  if (opts.privacyMode === "SURPRISE") {
-    await safeSend(api, opts.ownerTelegramId, t.notify.ownerPurchasedSurprise(list));
-    return;
-  }
   await safeSend(
     api,
     opts.ownerTelegramId,
-    t.notify.ownerPurchasedOpen(list, escapeHtml(opts.itemTitle), escapeHtml(opts.guestName)),
+    opts.privacyMode === "SURPRISE"
+      ? t.notify.ownerBoughtSurprise(list)
+      : t.notify.ownerBoughtOpen(list, escapeHtml(opts.giftTitle), escapeHtml(opts.guestName)),
   );
 }
 
-export async function notifySubscribers(
+export async function notifyOwnerCoAuthorJoined(
   api: BotApi,
-  subscriberTelegramIds: string[],
-  text: string,
-  keyboard?: InlineKeyboard,
+  opts: { ownerTelegramId: string; wishlistTitle: string; name: string },
 ) {
-  for (const id of subscriberTelegramIds) {
-    await safeSend(api, id, text, keyboard);
-  }
+  await safeSend(
+    api,
+    opts.ownerTelegramId,
+    t.notify.ownerCoAuthorJoined(escapeHtml(opts.wishlistTitle), escapeHtml(opts.name)),
+  );
 }
 
-export async function notifyGuestItemRemoved(
+// ── Гостю: усе, що ламає його обіцянку ─────────────────────────────────────
+
+export async function notifyGuestGiftRemoved(
   api: BotApi,
-  opts: { guestTelegramId: string; wishlistTitle: string; itemTitle: string; alreadyPurchased: boolean },
+  opts: { guestTelegramId: string; wishlistTitle: string; giftTitle: string; alreadyBought: boolean },
 ) {
   const list = escapeHtml(opts.wishlistTitle);
-  const item = escapeHtml(opts.itemTitle);
+  const gift = escapeHtml(opts.giftTitle);
   await safeSend(
     api,
     opts.guestTelegramId,
-    opts.alreadyPurchased ? t.notify.itemRemovedPurchased(list, item) : t.notify.itemRemoved(list, item),
+    opts.alreadyBought
+      ? t.notify.guestGiftRemovedBought(list, gift)
+      : t.notify.guestGiftRemoved(list, gift),
+  );
+}
+
+export async function notifyGuestGiftRestored(
+  api: BotApi,
+  opts: { guestTelegramId: string; wishlistTitle: string; giftTitle: string },
+) {
+  await safeSend(
+    api,
+    opts.guestTelegramId,
+    t.notify.guestGiftRestored(escapeHtml(opts.wishlistTitle), escapeHtml(opts.giftTitle)),
   );
 }
 
@@ -172,24 +195,49 @@ export async function notifyGuestListDeleted(
   api: BotApi,
   opts: { guestTelegramId: string; wishlistTitle: string },
 ) {
-  await safeSend(api, opts.guestTelegramId, t.notify.listDeleted(escapeHtml(opts.wishlistTitle)));
+  await safeSend(api, opts.guestTelegramId, t.notify.guestListDeleted(escapeHtml(opts.wishlistTitle)));
 }
 
-export async function notifyGuestListArchived(
+export async function notifyGuestListFinished(
   api: BotApi,
   opts: { guestTelegramId: string; wishlistTitle: string },
 ) {
-  await safeSend(api, opts.guestTelegramId, t.notify.listArchived(escapeHtml(opts.wishlistTitle)));
+  await safeSend(api, opts.guestTelegramId, t.notify.guestListFinished(escapeHtml(opts.wishlistTitle)));
 }
 
-/** Tells the owner that someone accepted their editor invite. */
-export async function notifyOwnerEditorJoined(
+// ── Тим, хто стежить ───────────────────────────────────────────────────────
+
+export async function notifyWatchers(
   api: BotApi,
-  opts: { ownerTelegramId: string; wishlistTitle: string; editorName: string },
+  telegramIds: string[],
+  text: string,
+  keyboard?: InlineKeyboard,
 ) {
-  await safeSend(
+  for (const id of telegramIds) {
+    await safeSend(api, id, text, keyboard);
+  }
+}
+
+/**
+ * Still immediate, unlike new-gift announcements: a gift becoming free again
+ * is rare, time-sensitive, and exactly what following a list is for.
+ */
+export async function notifyWatchersGiftFreeAgain(
+  api: BotApi,
+  wishlistId: string,
+  wishlistTitle: string,
+  giftTitle: string,
+) {
+  const watchers = await prisma.subscription.findMany({
+    where: { wishlistId },
+    include: { user: { select: { telegramId: true } } },
+  });
+  if (watchers.length === 0) return;
+
+  await notifyWatchers(
     api,
-    opts.ownerTelegramId,
-    t.notify.editorJoined(escapeHtml(opts.wishlistTitle), escapeHtml(opts.editorName)),
+    watchers.map((w) => w.user.telegramId),
+    t.notify.giftFreeAgain(escapeHtml(wishlistTitle), escapeHtml(giftTitle)),
+    new InlineKeyboard().text(t.buttons.view, `g:open:${wishlistId}:a:0`),
   );
 }

@@ -12,6 +12,8 @@ import { t } from "../src/text.js";
 const REMINDER_LEAD_DAYS = 3;
 /** Processed-update rows only need to outlive Telegram's retry window. */
 const PROCESSED_UPDATE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Drafts and open questions expire after a day — see lib/drafts.ts. */
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 let initialized: Promise<void> | null = null;
 
@@ -117,7 +119,7 @@ async function sendNewItemDigests(api: Awaited<ReturnType<typeof getBot>>["api"]
     const delivered = await safeSend(
       api,
       sub.user.telegramId,
-      t.notify.newItemsDigest(escapeHtml(sub.wishlist.title), added),
+      t.notify.newGiftsDigest(escapeHtml(sub.wishlist.title), added),
       keyboard,
     );
     if (delivered) sent++;
@@ -159,7 +161,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       where: { createdAt: { lt: new Date(Date.now() - PROCESSED_UPDATE_TTL_MS) } },
     });
 
-    res.status(200).json({ ok: true, reminders, digests, purged });
+    // A day-old draft is not a plan any more, and a day-old question is not a
+    // question — expiry is enforced on read, this just stops the rows piling up.
+    const staleBefore = new Date(Date.now() - DRAFT_TTL_MS);
+    const { count: drafts } = await prisma.draft.deleteMany({
+      where: { updatedAt: { lt: staleBefore } },
+    });
+    await prisma.user.updateMany({
+      where: { pendingAt: { lt: staleBefore } },
+      data: { pendingAction: null, pendingAt: null },
+    });
+
+    res.status(200).json({ ok: true, reminders, digests, purged, drafts });
   } catch (err) {
     console.error("cron: failed", err);
     res.status(500).json({ ok: false });

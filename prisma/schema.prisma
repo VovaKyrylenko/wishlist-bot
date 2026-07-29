@@ -9,22 +9,43 @@ datasource db {
   provider = "postgresql"
 }
 
-// A Telegram user — can own wishlists and/or make reservations as a guest.
+// A Telegram user — can own wishlists and/or promise gifts on someone else's.
 model User {
-  id           String   @id @default(cuid())
-  telegramId   String   @unique
-  username     String?
-  firstName    String?
-  lastName     String?
-  contactPhone String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String   @id @default(cuid())
+  telegramId String   @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  wishlists     Wishlist[]        @relation("OwnedWishlists")
+  /// Legacy: guests used to have to hand over a phone number before their
+  /// first promise. Nothing collects it any more — the column stays only so
+  /// the people who already gave one can delete it from "Про мене".
+  contactPhone String?
+
+  /// Previous contact, read before it is refreshed, so the bot can open with
+  /// a digest ("поки тебе не було…") instead of a cold menu after a pause.
+  lastSeenAt DateTime @default(now())
+
+  /// The message id of this user's live screen. A tap that arrives from that
+  /// message edits it in place; a tap from anything older renders a fresh
+  /// screen at the bottom of the chat instead of resurrecting an old one.
+  screenMessageId Int?
+
+  /// What the bot last asked for, as `action[:argument]` (see lib/pending.ts).
+  /// This is the whole "conversation" mechanism: a plain message answers the
+  /// open question, and every button still works normally, so no screen can
+  /// ever trap the user mid-dialog.
+  pendingAction String?
+  pendingAt     DateTime?
+
+  wishlists     Wishlist[]       @relation("OwnedWishlists")
   editorAccess  WishlistEditor[]
   reservations  Reservation[]
   subscriptions Subscription[]
   visits        WishlistVisit[]
+  draft         Draft?
 
   @@index([telegramId])
 }
@@ -34,6 +55,8 @@ enum PrivacyMode {
   OPEN // owner sees full reservation details
 }
 
+/// ARCHIVED is what the product calls "завершений": the event has happened,
+/// the list moves into "Завершені" on Головна and stops taking promises.
 enum WishlistStatus {
   ACTIVE
   ARCHIVED
@@ -52,7 +75,8 @@ model Wishlist {
 
   /// Owner can mute per-reservation pings without losing the list itself.
   notifyOwner Boolean @default(true)
-  /// Single-use secret behind the "add editor" deep link; null when no invite is open.
+  /// Single-use secret behind the "invite a co-author" deep link; null when no
+  /// invite is open.
   editorInviteToken String? @unique
   /// Set once the pre-event reminder for the current `eventDate` has gone out,
   /// so the cron never sends it twice. Cleared whenever `eventDate` changes.
@@ -65,11 +89,14 @@ model Wishlist {
   editors       WishlistEditor[]
   subscriptions Subscription[]
   visits        WishlistVisit[]
+  drafts        Draft[]
 
   @@index([ownerId])
   @@index([eventDate])
 }
 
+/// A co-author ("співавтор"): sees exactly the owner's list screen minus the
+/// dangerous actions.
 model WishlistEditor {
   id         String   @id @default(cuid())
   wishlistId String
@@ -109,6 +136,10 @@ model WishlistItem {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
+  /// When the gift was removed, so "↩️ Повернути" can offer itself for a few
+  /// minutes and then quietly stop.
+  deletedAt DateTime?
+
   reservations Reservation[]
 
   @@index([wishlistId, status])
@@ -127,10 +158,16 @@ model Reservation {
   guestId       String
   guest         User              @relation(fields: [guestId], references: [id], onDelete: Cascade)
   quantity      Int
-  contactSnapshot String? // guest's contact name/username/phone at time of booking
-  status        ReservationStatus @default(ACTIVE)
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  /// Who the guest was at the moment of promising — shown to the owner only
+  /// when the surprise is switched off. Name and @username; no phone number.
+  contactSnapshot String?
+  status          ReservationStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  /// Set when the owner deleting the gift cancelled this promise, so undoing
+  /// that deletion restores exactly the promises it broke and nothing else.
+  autoCancelledAt DateTime?
 
   @@index([itemId])
   @@index([guestId])
@@ -166,6 +203,41 @@ model WishlistVisit {
   @@index([userId, lastSeenAt])
 }
 
+enum DraftKind {
+  GIFT
+  LIST
+}
+
+/// A half-finished action. Every gift is assembled here first — the preview
+/// card the user edits before saving *is* this row — which also means walking
+/// away mid-way loses nothing: the next visit offers "Продовжити?" instead of
+/// starting over. One per person; starting something new replaces the old one.
+model Draft {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind DraftKind @default(GIFT)
+
+  /// Which list the gift is headed for; null until the user has picked one.
+  wishlistId String?
+  wishlist   Wishlist? @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  title    String?
+  url      String?
+  imageUrl String?
+  price    String?
+  store    String?
+  comment  String?
+  quantity Int      @default(1)
+  priority Priority @default(NORMAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
 /// Telegram re-delivers an update when the webhook is slow to answer, which
 /// used to double-add items and double-book gifts. Seeing an update_id here
 /// means it has already been handled.
@@ -174,10 +246,4 @@ model ProcessedUpdate {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
-}
-
-// Persists grammY conversation/session state across serverless webhook invocations.
-model BotSession {
-  key   String @id
-  value String
 }

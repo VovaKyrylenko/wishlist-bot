@@ -1,29 +1,51 @@
 import type { MyContext } from "../context.js";
 import { prisma } from "../db.js";
-import { upsertUserFromCtx } from "./users.js";
-import { t } from "../text.js";
+import { currentUser, type CurrentUser } from "./users.js";
+import type { Wishlist, WishlistEditor } from "../../generated/prisma/client.js";
+
+export type ListRole = "owner" | "coAuthor" | "guest";
+
+export interface ListAccess {
+  wishlist: Wishlist & { editors: WishlistEditor[] };
+  user: CurrentUser;
+  role: ListRole;
+  isOwner: boolean;
+  /** Owner or co-author: may add, edit, reorder and remove gifts. */
+  canEditGifts: boolean;
+}
+
+export type ListLookup =
+  | { ok: true; access: ListAccess }
+  | { ok: false; reason: "gone" | "denied" };
 
 /**
- * Loads a wishlist and verifies the sender may act on it, answering the
- * callback query with an error alert (and returning null) when access is
- * denied. `requireOwner: true` excludes shared editors (used for
- * list-level settings); `false` allows owner or editor (used for items).
+ * Loads a list together with the sender's role in it.
+ *
+ * Nothing is rendered here on failure. A missing or forbidden list is not an
+ * error popup any more — the caller shows Головна with a line explaining what
+ * happened, because "Це не для тебе — доступу нема 🙅" left the user staring
+ * at a screen they could not leave.
  */
-export async function checkWishlistAccess(ctx: MyContext, wishlistId: string, requireOwner: boolean) {
-  const user = await upsertUserFromCtx(ctx);
+export async function lookupList(ctx: MyContext, wishlistId: string): Promise<ListLookup> {
+  const user = await currentUser(ctx);
   const wishlist = await prisma.wishlist.findUnique({
     where: { id: wishlistId },
     include: { editors: true },
   });
-  if (!wishlist) {
-    await ctx.answerCallbackQuery({ text: t.common.notFoundAlert, show_alert: true });
-    return null;
-  }
+  if (!wishlist) return { ok: false, reason: "gone" };
+
   const isOwner = wishlist.ownerId === user.id;
-  const isEditor = wishlist.editors.some((e) => e.userId === user.id);
-  if (requireOwner ? !isOwner : !isOwner && !isEditor) {
-    await ctx.answerCallbackQuery({ text: t.common.noAccessAlert, show_alert: true });
-    return null;
-  }
-  return { wishlist, user, isOwner, isEditor };
+  const isCoAuthor = wishlist.editors.some((e) => e.userId === user.id);
+  if (!isOwner && !isCoAuthor) return { ok: false, reason: "denied" };
+
+  return {
+    ok: true,
+    access: {
+      wishlist,
+      user,
+      role: isOwner ? "owner" : "coAuthor",
+      isOwner,
+      canEditGifts: true,
+    },
+  };
 }
