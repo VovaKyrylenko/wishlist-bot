@@ -1,20 +1,20 @@
-import { Bot, session } from "grammy";
+import { Bot } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
 import { PrismaAdapter } from "@grammyjs/storage-prisma";
 import { prisma } from "./db.js";
-import { type MyContext, initialSession } from "./context.js";
+import { type MyContext } from "./context.js";
 
 import { registerMenu } from "./features/menu.js";
 import {
   registerWishlists,
   createWishlistConversation,
   editWishlistFieldConversation,
-  addEditorConversation,
 } from "./features/wishlists.js";
 import {
   registerItems,
   addItemConversation,
   editItemFieldConversation,
+  editItemQuantityConversation,
 } from "./features/items.js";
 import { registerGuest } from "./features/guest.js";
 import {
@@ -23,6 +23,8 @@ import {
   changeReservationQtyConversation,
 } from "./features/reservations.js";
 import { registerSubscriptions } from "./features/subscriptions.js";
+import { ack } from "./lib/ui.js";
+import { t } from "./text.js";
 
 let bot: Bot<MyContext> | undefined;
 
@@ -34,14 +36,6 @@ export function getBot(): Bot<MyContext> {
 
   bot = new Bot<MyContext>(token);
 
-  const sessionStorage = new PrismaAdapter(prisma.botSession);
-
-  bot.use(
-    session({
-      initial: initialSession,
-      storage: sessionStorage,
-    }),
-  );
   bot.use(
     conversations({
       storage: {
@@ -54,11 +48,14 @@ export function getBot(): Bot<MyContext> {
 
   bot.use(createConversation(createWishlistConversation, "createWishlist"));
   bot.use(createConversation(editWishlistFieldConversation, "editWishlistField"));
-  bot.use(createConversation(addEditorConversation, "addEditor"));
   bot.use(createConversation(addItemConversation, "addItem"));
   bot.use(createConversation(editItemFieldConversation, "editItemField"));
+  bot.use(createConversation(editItemQuantityConversation, "editItemQuantity"));
   bot.use(createConversation(reserveConversation, "reserve"));
   bot.use(createConversation(changeReservationQtyConversation, "changeReservationQty"));
+
+  // The page counter in a pager row is a label, not a button.
+  bot.callbackQuery("noop", (ctx) => ack(ctx));
 
   registerMenu(bot);
   registerWishlists(bot);
@@ -67,9 +64,25 @@ export function getBot(): Bot<MyContext> {
   registerReservations(bot);
   registerSubscriptions(bot);
 
+  // Buttons on screens from an older deploy would otherwise spin forever.
+  bot.on("callback_query:data", async (ctx) => {
+    console.warn("Unhandled callback data:", ctx.callbackQuery.data);
+    await ack(ctx, t.common.buttonExpired);
+  });
+
   bot.catch((err) => {
     console.error("Unhandled bot error:", err.error, "\nupdate:", JSON.stringify(err.ctx.update));
   });
 
   return bot;
+}
+
+/** Populates the "/" menu in Telegram clients. Safe to call on every deploy. */
+export async function syncBotCommands(bot: Bot<MyContext>) {
+  await bot.api.setMyCommands([
+    { command: "menu", description: t.menu.commandMenu },
+    { command: "help", description: t.menu.commandHelp },
+    { command: "cancel", description: t.menu.commandCancel },
+    { command: "start", description: t.menu.commandStart },
+  ]);
 }

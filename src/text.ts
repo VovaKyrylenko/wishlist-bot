@@ -5,16 +5,34 @@
 // Tone of voice + visual style are documented in CLAUDE.md ("Дружній
 // друзяка" + фіолетовий/сердечка/крапки) — read that before editing copy.
 
-const SKIP_HINT = "Немає? Тисни «-» — і рухаємось далі.";
+/**
+ * Ukrainian needs three plural forms, so "1 бажань" reads as broken to a
+ * native speaker. Kept here rather than in lib/format.ts because that module
+ * imports this one.
+ */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+const gifts = (n: number) => `${n} ${plural(n, "бажання", "бажання", "бажань")}`;
 
 export const t = {
   common: {
-    skip: "-",
-    skipHint: SKIP_HINT,
     cancelled: "Ок, скасовано 🙂",
+    nothingToCancel: "Та нема чого скасовувати 🙂 Ось меню:",
     notFoundAlert: "Не знайшов такий список 😕",
     noAccessAlert: "Це не для тебе — доступу нема 🙅",
     guestFallbackName: "Гість",
+    finishStepFirst: "Спершу заверши цей крок — або тисни «Скасувати» 🙂",
+    textPlease: "Мені потрібен текст 🙂 Напиши словами або тисни «Скасувати».",
+    integerPlease: "Потрібне ціле число, наприклад 1 🙂",
+    tapNumberHint: "Тисни номер, щоб відкрити.",
+    buttonExpired: "Ця кнопка вже застаріла 🙂 Відкрий розділ заново через меню.",
+    tooLong: (max: number) => `Трохи задовго 🙂 Спробуй вкластися в ${max} символів.`,
   },
 
   // Button labels stay short and functional — no decorative emoji beyond
@@ -23,43 +41,51 @@ export const t = {
     menuCreate: "➕ Створити вішліст",
     menuMyLists: "📋 Мої вішлісти",
     menuMyReservations: "🎁 Мої бронювання",
-    menuSubscriptions: "🔔 Підписки",
+    menuSubscriptions: "👀 Чужі списки",
     menuSettings: "⚙️ Налаштування",
 
-    open: "Відкрити",
-    share: "Поділитися",
-    settings: "⚙️ Налаштування",
-    backToList: "⬅️ Назад до списку",
-    sendToFriend: "Надіслати другу",
-    shareThisList: "📤 Поділитися списком",
+    skip: "Пропустити",
+    cancel: "Скасувати",
+    back: "⬅️ Назад",
+    backToLists: "⬅️ Мої вішлісти",
+    backToList: "⬅️ До списку",
+    backToReservations: "⬅️ До бронювань",
 
-    editTitle: "✏️ Змінити назву",
-    editDescription: "📝 Змінити опис",
-    editDate: "📅 Змінити дату",
+    share: "📤 Поділитися",
+    settings: "⚙️ Налаштування",
+    sendToFriend: "Надіслати другу",
+
+    editTitle: "✏️ Назва",
+    editDescription: "📝 Опис",
+    editDate: "📅 Дата",
     privacy: "🔒 Приватність",
-    addEditor: "👥 Додати редактора",
+    editors: "👥 Редактори",
+    inviteEditor: "Створити запрошення",
+    revokeInvite: "Скасувати запрошення",
+    notifyOn: "🔔 Сповіщення: увімкнені",
+    notifyOff: "🔕 Сповіщення: вимкнені",
+    rotateLink: "🔗 Оновити посилання",
+    confirmRotateLink: "Так, оновити",
     archive: "📦 Архівувати",
     unarchive: "♻️ Розархівувати",
     duplicate: "📄 Копія",
     deleteList: "🗑 Видалити список",
     confirmArchive: "Так, архівувати",
     confirmDelete: "Все одно видалити",
-    cancel: "Скасувати",
 
     addItem: "➕ Додати бажання",
-    manualEntry: "✍️ Ввести вручну",
-    add: "Додати",
-    edit: "Редагувати",
+    saveItem: "✅ Зберегти",
     editItem: "✏️ Редагувати",
     priority: "📌 Пріоритет",
     quantity: "🔢 Кількість",
-    moveUp: "⬆️",
-    moveDown: "⬇️",
+    moveUp: "⬆️ Вище",
+    moveDown: "⬇️ Нижче",
+    moveTop: "⏫ На початок",
     deleteItem: "🗑 Видалити",
     openLink: "🔗 Відкрити посилання",
-    fieldTitle: "Назву",
+    fieldTitle: "Назва",
     fieldUrl: "Посилання",
-    fieldPrice: "Ціну",
+    fieldPrice: "Ціна",
     fieldStore: "Магазин",
     fieldComment: "Коментар",
 
@@ -69,25 +95,29 @@ export const t = {
     privacySurprise: "🎁 Сюрприз",
     privacyOpen: "👀 Відкритий",
 
-    viewGifts: "🎁 Переглянути подарунки",
-    subscribe: "🔔 Підписатися на оновлення",
+    subscribe: "🔔 Підписатися",
     unsubscribe: "🔕 Відписатися",
     reserve: "🎁 Забронювати",
     filterAll: "Усі",
     filterAvailable: "Доступні",
     filterReserved: "Заброньовані",
 
-    confirmReservation: "✅ Підтвердити бронювання",
-    back: "Назад",
-    viewMyReservations: "Переглянути мої бронювання",
+    confirmReservation: "✅ Підтвердити",
     cancelReservation: "Скасувати бронювання",
-    changeQuantity: "Змінити кількість",
-    markPurchased: "Позначити як придбано",
-    openProduct: "Відкрити товар",
+    changeQuantity: "🔢 Змінити кількість",
+    markPurchased: "✅ Уже придбав",
+    confirmPurchased: "Так, придбав",
+    undoPurchased: "↩️ Повернути в активні",
+    openProduct: "🔗 Відкрити товар",
     confirmCancel: "Так, скасувати",
     no: "Ні",
     shareContact: "📱 Поділитися контактом",
     view: "Переглянути",
+
+    deleteMyData: "🗑 Видалити мої дані",
+    confirmDeleteMyData: "Так, видалити все",
+    howItWorks: "❓ Як це працює",
+    backToSettings: "⬅️ До налаштувань",
   },
 
   labels: {
@@ -116,61 +146,139 @@ export const t = {
       "Жодної реєстрації, жодних складнощів. Усе тут, у Telegram.",
     ].join("\n"),
     mainMenu: "Ось меню:",
+    help: [
+      "🎁 <b>Як це працює</b>",
+      "",
+      "🟣 Створюєш вішліст і кидаєш у нього посилання на товари — я сам витягну назву, фото й ціну.",
+      "🟣 Ділишся посиланням з друзями.",
+      "🟣 Вони бронюють подарунки, щоб не задублювати одне одного.",
+      "🟣 Ти бачиш, скільки вже розібрали — а якщо список у режимі «Сюрприз», то лише кількість, без деталей 🤫",
+      "",
+      "<b>Команди</b>",
+      "/menu — головне меню",
+      "/cancel — вийти з поточного кроку",
+      "/help — оця підказка",
+      "",
+      "Приватність і сповіщення налаштовуються окремо для кожного списку: відкрий список → «Налаштування» 💜",
+    ].join("\n"),
+    commandStart: "Почати спочатку",
+    commandMenu: "Головне меню",
+    commandHelp: "Як це працює",
+    commandCancel: "Скасувати поточний крок",
+
     settingsHeader: "⚙️ Налаштування",
-    settingsTelegramId: (id: string) => `Твій Telegram ID: ${id}`,
-    settingsUsername: (username: string) => `Юзернейм: @${username}`,
+    settingsTelegramId: (id: string) => `🟣 Твій Telegram ID: <code>${id}</code>`,
+    settingsUsername: (username: string) => `🟣 Юзернейм: @${username}`,
+    settingsStats: (lists: number, reservations: number) =>
+      `🟣 Вішлістів: ${lists} · бронювань: ${reservations}`,
     settingsHint:
       "Приватність і сповіщення налаштовуються окремо для кожного списку — відкрий список → «Налаштування» 💜",
+    settingsDataNote: (hasPhone: boolean) =>
+      hasPhone
+        ? "🟣 Твій номер збережений для одноразової перевірки при бронюванні. Його бачить лише власник списку, який ти забронював, і лише в режимі «Відкритий»."
+        : "🟣 Номер телефону не збережений.",
+
+    confirmDeleteMyData: [
+      "Видалити всі твої дані?",
+      "",
+      "Зникнуть назавжди:",
+      "🟣 усі твої вішлісти разом із бажаннями",
+      "🟣 усі твої бронювання (власники отримають сповіщення)",
+      "🟣 підписки, історія переглядів і збережений номер",
+      "",
+      "Це незворотно.",
+    ].join("\n"),
+    dataDeleted: "Готово — усе видалено. Було приємно 💜 Якщо колись повернешся, тисни /start.",
+
+    editorInviteAccepted: (title: string) =>
+      `✨ Тепер ти можеш редагувати список «${title}» — він з'явився у розділі «📋 Мої вішлісти».`,
+    editorInviteInvalid: "Це запрошення вже недійсне 😕 Попроси власника створити нове.",
+    editorInviteOwn: "Це ж твій власний список 🙂",
   },
 
   wishlist: {
     noneYet: "У тебе ще немає жодного вішліста. Тисни «➕ Створити вішліст» — і почнемо! ✨",
-    yourLists: (count: number) => `📋 Твої вішлісти (${count})`,
-    itemCount: (count: number) => `${count} бажань`,
-    fullyReservedCount: (count: number) => `🟣 ${count} повністю заброньовано`,
-    partiallyReservedCount: (count: number) => `🟣 ${count} частково заброньовано`,
-    archivedTag: "📦 У архіві",
+    yourLists: (count: number) => `📋 <b>Твої вішлісти (${count})</b>`,
+    listRow: (index: number, icon: string, title: string) => `${index}. ${icon} <b>${title}</b>`,
+    listRowMeta: (parts: string[]) => `    ${parts.join(" · ")}`,
+    itemCount: gifts,
+    reservedCount: (count: number) => `🟣 ${count} заброньовано`,
+    archivedTag: "в архіві",
 
     askTitle: "Як назвемо список? (наприклад: «День народження Володимира»)",
-    askDescription: `Додай короткий опис (необов'язково). ${SKIP_HINT}`,
-    askDate: `Коли подія? Формат ДД.ММ.РРРР (необов'язково). ${SKIP_HINT}`,
-    dateNotRecognizedContinuing: "Не розібрав дату — ну і гаразд, їдемо далі без неї.",
-    askPrivacy: "Хочеш бачити, хто що бронює? У режимі «Сюрприз» це залишиться таємницею навіть для тебе 🤫",
-    created: (title: string, link: string) =>
-      `✨ Список «${title}» готовий!\n\nОсь посилання для друзів:\n${link}\n\nНадішли його або одразу додай перше бажання 💜`,
+    created: (link: string) =>
+      [
+        "✨ Готово, список створено!",
+        "",
+        "Ось посилання для друзів:",
+        link,
+        "",
+        "Тепер додай перше бажання 💜",
+      ].join("\n"),
 
-    settingsTitle: (title: string) => `⚙️ Налаштування «${title}»`,
-    noDescription: "(без опису)",
-    noDate: "(дата поки не вказана)",
+    settingsTitle: (title: string) => `⚙️ <b>Налаштування «${title}»</b>`,
+    noDescription: "Опису поки нема",
+    noDate: "Дата поки не вказана",
 
     askNewTitle: "Яка нова назва?",
-    titleUpdated: "✅ Назву оновлено!",
-    askNewDescription: `Новий опис? Пиши. Хочеш прибрати — надішли «-».`,
-    descriptionUpdated: "✅ Опис оновлено!",
-    askNewDate: "Нова дата у форматі ДД.ММ.РРРР. Щоб прибрати — надішли «-».",
-    dateUpdated: "✅ Дату оновлено!",
-    dateNotRecognizedRetry: "Хм, не розпізнав дату — спробуй ще раз у форматі ДД.ММ.РРРР.",
+    titleUpdated: "Назву оновлено ✅",
+    askNewDescription: "Новий опис? Пиши — або тисни «Пропустити», щоб прибрати його зовсім.",
+    descriptionUpdated: "Опис оновлено ✅",
+    askNewDate: [
+      "Коли подія?",
+      "",
+      "Розумію по-різному: «12.08.2026», «12.08», «25 грудня», «завтра».",
+      "Тисни «Пропустити», щоб прибрати дату.",
+    ].join("\n"),
+    dateUpdated: "Дату оновлено ✅",
+    dateNotRecognized:
+      "Хм, не розпізнав дату 😕 Спробуй так: «12.08.2026», «12.08», «25 грудня» або «завтра».",
+    datePastNotice: "📅 Дата вже минула — нагадування по ній не надсилатиму.",
 
-    askEditorUsername: "Кидай юзернейм у форматі @username (у людини має бути публічний юзернейм у Telegram).",
-    editorNotFound: "Не знайшов такого користувача 😕 Перевір юзернейм і спробуй ще раз.",
-    editorAdded: (username: string) => `✅ @${username} тепер теж може редагувати цей список 💜`,
+    editorsTitle: (title: string) => `👥 <b>Редактори «${title}»</b>`,
+    noEditors: "Поки що нікого — редагуєш тільки ти.",
+    editorRow: (index: number, name: string) => `${index}. 🟣 ${name}`,
+    editorsHint: "Тисни номер, щоб прибрати доступ.",
+    editorRemoved: (name: string) => `Прибрав доступ для ${name}.`,
+    inviteCreated: (link: string) =>
+      [
+        "👥 Ось запрошення в редактори:",
+        "",
+        link,
+        "",
+        "Кидай його тій людині — доступ вона отримає, щойно тисне посилання. Запрошення одноразове.",
+      ].join("\n"),
+    inviteRevoked: "Запрошення скасовано.",
+    inviteActive: "🟣 Є активне запрошення в редактори.",
+
+    notifyOwnerLine: (enabled: boolean) =>
+      enabled ? "🔔 Сповіщення про бронювання: увімкнені" : "🔕 Сповіщення про бронювання: вимкнені",
+    notifyOwnerUpdated: "Налаштування сповіщень оновлено ✅",
+
+    confirmRotateLink:
+      "Оновити посилання на список?\n\n⚠️ Старе перестане працювати — усі, кому ти його вже кидав, більше не відкриють список.",
+    linkRotated: (link: string) => `🔗 Готово, ось нове посилання:\n\n${link}`,
 
     askPrivacyMode: "Обери режим приватності:",
-    privacyUpdated: (label: string) => `✅ ${label}`,
+    privacyUpdated: "Режим приватності оновлено ✅",
 
     confirmArchive: (title: string) =>
-      `Архівувати «${title}»? Список більше не прийматиме бронювань і сповіщень.`,
+      `Архівувати «${title}»?\n\nСписок більше не прийматиме нових бронювань, але залишиться у тебе.`,
     archived: "📦 Готово, список в архіві.",
     unarchived: "♻️ Список знову активний!",
 
-    duplicated: (title: string, itemCount: number, link: string) =>
-      `✨ Копію «${title}» створено (${itemCount} бажань, без бронювань і підписників).\n\n${link}`,
+    duplicated: (itemCount: number, link: string) =>
+      `✨ Копію створено (${gifts(itemCount)}, без бронювань і підписників).\n\n${link}`,
 
-    confirmDelete: (title: string, warning: string) => `Видалити список «${title}» назавжди?${warning}`,
+    confirmDelete: (title: string, warning: string) =>
+      `Видалити список «${title}» назавжди?${warning}`,
     deleteActiveReservationsWarning: (count: number) =>
       `\n\n⚠️ У списку є ${count} активних бронювань. Гості отримають сповіщення про видалення.`,
     deleted: (title: string) => `🗑 Список «${title}» видалено.`,
 
+    shareHeader: "📤 Ось посилання — кидай друзям:",
+    shareEmptyWarning:
+      "⚠️ У списку поки жодного бажання — друзі побачать порожньо. Може, спершу додаси щось? 🙂",
     shareMessage: (title: string, link: string) =>
       [
         `🎁 Мій вішліст «${title}»`,
@@ -182,64 +290,68 @@ export const t = {
   },
 
   item: {
-    itemsHeader: (count: number) => `${count} бажань`,
+    empty: "Поки що порожньо. Тисни «➕ Додати бажання» — і почнемо ✨",
+    tapNumberHint: "Тисни номер, щоб відкрити бажання.",
+    itemRow: (index: number, icon: string, title: string) => `${index}. ${icon} <b>${title}</b>`,
+    itemRowMeta: (parts: string[]) => `    ${parts.join(" · ")}`,
+    shortFullyReserved: "✅ заброньовано",
+    shortPartial: (reserved: number, needed: number) => `🟣 ${reserved} з ${needed}`,
+    shortNeeded: (needed: number) => `потрібно ${needed}`,
+
     fullyReserved: "✅ Уже заброньовано",
     availabilityDetail: (needed: number, reserved: number, available: number) =>
       `🟣 Потрібно: ${needed}\n🟣 Заброньовано: ${reserved}\n🟣 Залишилось: ${available}`,
     availableStatus: (needed: number) => `🟣 Потрібно: ${needed}\n🟣 Статус: доступно`,
+    reservedByHeader: "Хто бронює:",
+    reservedByRow: (name: string, quantity: number, status: string) =>
+      `🟣 ${name} — ${quantity} шт (${status})`,
+    reservedByContact: (contact: string) => `    ${contact}`,
+    /** Owner-facing, SURPRISE mode: the whole point is not knowing. */
+    surpriseHidden: "🤫 Режим «Сюрприз» — не показую, що вже розібрали.",
 
-    askLinkOrManual:
-      "Кидай посилання на товар — я сам спробую витягнути назву, фото й ціну.\n\nАбо тисни кнопку і заповни все руками.",
-    askTitleManual: "Як називається товар?",
+    askLinkOrTitle:
+      "Кидай посилання на товар — я сам спробую витягнути назву, фото й ціну.\n\nАбо просто напиши, що це за подарунок.",
     lookingUpLink: "🔎 Хвилинку, дивлюся що там...",
-    untitledFallback: "Без назви",
+    previewFound: "Ось що знайшов:",
+    previewNotFound: "Сам не розпізнав товар за посиланням — напиши назву, будь ласка:",
+    previewHint: "Зберігаю як 1 шт із пріоритетом «⭐ Хочу» — усе інше можна змінити будь-коли.",
     previewPrice: (price: string) => `Ціна: ${price}`,
     previewStore: (store: string) => `Магазин: ${store}`,
-    askCorrectTitle: "Введи правильну назву:",
-    previewNotFound: "Не зміг сам розпізнати товар за посиланням. Введи назву руками:",
-    askTitleAsText: "Введи назву товару текстом:",
-    askUrlOptional: `Посилання на товар (необов'язково). ${SKIP_HINT}`,
-    askPriceOptional: `Ціна (необов'язково). ${SKIP_HINT}`,
-    askStoreOptional: `Магазин (необов'язково). ${SKIP_HINT}`,
-    askQuantity: "Скільки штук потрібно? Просто число (наприклад, 1).",
-    askQuantityInteger: "Потрібне ціле число, наприклад 1 🙂",
-    quantityTooLow: "Має бути хоча б 1. Спробуй ще раз.",
-    askCommentOptional: `Коментар (необов'язково — колір, розмір, усе що важливо). ${SKIP_HINT}`,
-    askPriorityForNewItem: "Наскільки сильно хочеш цей подарунок?",
     added: (title: string) => `✅ Додав «${title}» до списку. Гарний вибір! 💜`,
 
-    notFound: "Такого товару не знайшов.",
-    notFoundAlert: "Товар не знайдено",
+    notFoundAlert: "Не знайшов цей подарунок 😕",
     askWhatToEdit: "Що будемо міняти?",
     fieldPrompt: {
       title: "Нова назва?",
-      url: `Нове посилання. Прибрати — надішли «-».`,
-      price: `Нова ціна. Прибрати — надішли «-».`,
-      store: `Новий магазин. Прибрати — надішли «-».`,
-      comment: `Новий коментар. Прибрати — надішли «-».`,
-      quantity: "Скільки штук потрібно? Ціле число.",
+      url: "Нове посилання. Тисни «Пропустити», щоб прибрати його.",
+      price: "Нова ціна. Тисни «Пропустити», щоб прибрати її.",
+      store: "Новий магазин. Тисни «Пропустити», щоб прибрати його.",
+      comment: "Новий коментар — колір, розмір, усе що важливо. Тисни «Пропустити», щоб прибрати.",
     },
-    updated: "✅ Оновлено!",
-    askQuantityIntegerOnly: "Потрібне ціле число 🙂",
-    quantityAlreadyReserved: (reserved: number) => `Уже заброньовано ${reserved} од. Менше не вийде.`,
-    quantityMinOne: "Має бути хоча б 1.",
-    quantityUpdated: "✅ Кількість оновлено!",
+    updated: "Оновлено ✅",
+    askQuantity: "Скільки штук потрібно? Просто число.",
+    quantityAlreadyReserved: (reserved: number) =>
+      `Уже заброньовано ${reserved} од. — менше поставити не вийде. Спробуй ще раз.`,
+    quantityMinOne: "Має бути хоча б 1. Спробуй ще раз.",
+    quantityUpdated: "Кількість оновлено ✅",
 
-    askPriorityChange: "Наскільки сильно хочеш цей подарунок?",
-    priorityUpdated: "✅ Пріоритет оновлено!",
+    askPriority: "Наскільки сильно хочеш цей подарунок?",
+    priorityUpdated: "Пріоритет оновлено ✅",
 
     confirmDelete: (title: string, warning: string) => `Видалити «${title}»?${warning}`,
     deleteReservedWarning: (count: number) =>
-      `\n\nЦей подарунок уже забронювали (${count}). Вони отримають сповіщення про видалення.`,
-    deleted: (title: string) => `🗑 «${title}» видалено.`,
+      `\n\n⚠️ Цей подарунок уже забронювали (${count}). Гості отримають сповіщення, а бронювання стануть скасованими.`,
+    deleted: "🗑 Бажання видалено.",
+    movedToTop: "⏫ Тепер на початку списку.",
   },
 
   guest: {
     listNotFound: "Хм, не знайшов такий список 😕 Може, посилання застаріло?",
-    archivedNotice: "\n📦 Список закрито власником — нові бронювання не приймаються.",
-    shareThisListPrompt: "Поділитися цим списком:",
-    listHeader: (title: string, count: number) => `🎁 ${title} — ${count} бажань`,
+    archivedNotice: "📦 Список закрито власником — нові бронювання не приймаються.",
+    tapNumberHint: "Тисни номер, щоб глянути подарунок.",
     empty: "Тут поки що порожньо 🤷",
+    emptyForFilter: "За цим фільтром нічого нема 🤷",
+    subscribedHint: "🔔 Ти підписаний — напишу, коли з'явиться щось нове.",
   },
 
   reservation: {
@@ -250,53 +362,113 @@ export const t = {
     allAvailable: (count: number) => `Усе, що є (${count})`,
     askContact:
       "Щоб захистити список від спаму, поділись, будь ласка, своїм контактом Telegram (це не реєстрація — лише одноразова перевірка, більше не знадобиться).",
-    askContactRetry: "Тисни кнопку «📱 Поділитися контактом», щоб продовжити 🙂",
+    askContactRetry: "Тисни кнопку «📱 Поділитися контактом» унизу, щоб продовжити 🙂",
     contactThanks: "Дякую! 💜 Наступні бронювання будуть без цього кроку.",
     summary: (title: string, quantity: number, contact: string) =>
-      ["Бронюєш:", "", title, `Кількість: ${quantity}`, `Контакт: ${contact}`].join("\n"),
-    confirmed: "✅ Готово, заброньовано! 💜",
+      [
+        "<b>Перевіримо:</b>",
+        "",
+        `🎁 ${title}`,
+        `🟣 Кількість: ${quantity}`,
+        `🟣 Твій контакт для власника: ${contact}`,
+      ].join("\n"),
+    confirmed: (title: string) => `✅ Готово, «${title}» заброньовано! 💜`,
     itemGoneAtConfirm: "Ой, цей подарунок уже недоступний.",
     raceLost: "От халепа — цю кількість щойно розібрали. Спробуй менше.",
 
-    noneYet: "У тебе поки немає активних бронювань.",
-    yourReservations: (count: number) => `🎁 Твої бронювання (${count})`,
-    quantityLine: (quantity: number) => `Кількість: ${quantity}`,
-    statusLine: (label: string) => `Статус: ${label}`,
+    noneYet: "У тебе поки немає активних бронювань. Відкрий чийсь список за посиланням — і обери подарунок 🎁",
+    yourReservations: (count: number) => `🎁 <b>Твої бронювання (${count})</b>`,
+    reservationRow: (index: number, title: string) => `${index}. <b>${title}</b>`,
+    reservationRowMeta: (parts: string[]) => `    ${parts.join(" · ")}`,
+    fromList: (title: string) => `зі списку «${title}»`,
+    quantityShort: (quantity: number) => `${quantity} шт`,
+    quantityLine: (quantity: number) => `🟣 Кількість: ${quantity}`,
+    statusLine: (label: string) => `🟣 Статус: ${label}`,
 
     noLongerActive: "Це бронювання вже неактивне.",
-    askNewQuantity: (max: number) => `Скільки штук бронюємо? (максимум ${max})`,
-    askQuantityIntegerOnly: "Потрібне ціле число 🙂",
-    quantityMinOne: "Має бути хоча б 1.",
+    askNewQuantity: (max: number) => `Скільки штук бронюємо? Максимум ${max}.`,
+    quantityMinOne: "Має бути хоча б 1. Спробуй ще раз.",
     quantityExceedsMax: (max: number) => `Максимум ${max}. Спробуй ще раз.`,
-    quantityUpdated: "✅ Кількість оновлено!",
+    quantityUpdated: "Кількість оновлено ✅",
 
     notFoundAlert: "Бронювання не знайдено",
     notActiveAlert: "Бронювання вже неактивне",
     confirmCancel: (title: string) => `Скасувати бронювання «${title}»?`,
     cancelled: "↩️ Бронювання скасовано.",
-    markedPurchased: "✅ Позначено як придбано!",
+
+    confirmPurchased: (title: string) =>
+      `Позначити «${title}» як придбане?\n\nПодарунок залишиться за тобою — інші його не заброньують.`,
+    markedPurchased: "✅ Позначено як придбано. Ти молодець! 💜",
+    purchasedUndone: "↩️ Повернув у активні бронювання.",
+
+    selfReserveAlert: "Це твій власний список 🙂 Бронювати в себе не треба.",
+    contactNotYours:
+      "Це чийсь чужий контакт 🙂 Тисни саме кнопку «📱 Поділитися контактом» — вона надішле твій власний.",
+    mergedIntoExisting: (total: number) =>
+      `Ти вже бронював цей подарунок — просто збільшив кількість до ${total} 🙂`,
   },
 
   subscription: {
-    noneYet: "Ти поки ні на що не підписаний(а). Відкрий список за посиланням і тисни «🔔 Підписатися».",
-    yourSubscriptions: (count: number) => `🔔 Твої підписки (${count})`,
-    archivedSuffix: " (архів)",
-    subscribedToast: "Підписано!",
-    subscribedMessage: (title: string) => `🔔 Підписку на «${title}» оформлено 💜`,
-    unsubscribedToast: "Відписано",
-    unsubscribedMessage: "🔕 Підписку скасовано.",
+    noneYet:
+      "Ти ще не відкривав чужих списків. Щойно друг кине тобі посилання — список збережеться тут, щоб не шукати його в переписці 🙂",
+    yourSubscriptions: (count: number) => `👀 <b>Чужі списки (${count})</b>`,
+    subscriptionRow: (index: number, title: string, suffix: string) => `${index}. 🎁 <b>${title}</b>${suffix}`,
+    archivedSuffix: " — в архіві",
+    subscribedSuffix: " 🔔",
+    subscribedToast: "Підписано 🔔",
+    unsubscribedToast: "Відписано 🔕",
+    listHint: "🔔 — списки, з яких приходять оновлення.",
   },
 
   notify: {
     ownerNewReservationSurprise: (list: string) => `✅ У твоєму вішлісті «${list}» з'явилося нове бронювання 💜`,
-    ownerNewReservationOpen: (list: string, item: string, quantity: number, guest: string) =>
-      `✅ Нове бронювання у «${list}»\n\n🎁 ${item}\nКількість: ${quantity}\nБронює: ${guest}`,
+    ownerNewReservationOpen: (
+      list: string,
+      item: string,
+      quantity: number,
+      guest: string,
+      contact: string | null,
+    ) =>
+      [
+        `✅ Нове бронювання у «${list}»`,
+        "",
+        `🎁 ${item}`,
+        `🟣 Кількість: ${quantity}`,
+        `🟣 Бронює: ${guest}`,
+        contact ? `🟣 Контакт: ${contact}` : null,
+      ]
+        .filter((line) => line !== null)
+        .join("\n"),
     ownerCancelledSurprise: (list: string) => `↩️ У «${list}» хтось скасував бронювання.`,
     ownerCancelledOpen: (list: string, item: string) => `↩️ Скасовано бронювання у «${list}»\n\n🎁 ${item}`,
-    newItem: (list: string, item: string) => `🔔 У «${list}» з'явилося нове бажання:\n\n${item}`,
-    itemAvailableAgain: (list: string, item: string) => `🔔 У «${list}» знову доступний подарунок:\n\n${item}`,
+    ownerPurchasedSurprise: (list: string) =>
+      `🎁 Один із подарунків у «${list}» уже куплено. Деталей не кажу — сюрприз 🤫`,
+    ownerPurchasedOpen: (list: string, item: string, guest: string) =>
+      `🎁 Подарунок із «${list}» уже куплено!\n\n🎁 ${item}\n🟣 Придбав(ла): ${guest}`,
+    editorJoined: (list: string, editor: string) =>
+      `👥 ${editor} приєднався(лась) до редагування «${list}» 💜`,
+
+    /**
+     * One digest instead of a ping per gift: filling a fresh list in one
+     * evening used to fire twenty separate notifications at every subscriber.
+     */
+    newItemsDigest: (list: string, count: number) =>
+      `🔔 У «${list}» ${count === 1 ? "з'явилося нове бажання" : `з'явилося нових бажань: ${count}`} ✨`,
+    itemAvailableAgain: (list: string, item: string) => `🔔 У «${list}» знову доступний подарунок:\n\n🎁 ${item}`,
+
+    eventReminderGuest: (list: string, days: number, link: string) =>
+      [
+        `📅 Нагадую: подія «${list}» вже ${days === 1 ? "завтра" : `через ${days} дн.`}`,
+        "",
+        "Якщо ще не обрав подарунок — саме час:",
+        link,
+      ].join("\n"),
+    eventReminderOwner: (list: string, days: number) =>
+      `📅 Подія «${list}» ${days === 1 ? "вже завтра" : `через ${days} дн.`} — саме час нагадати друзям про список 💜`,
     itemRemoved: (list: string, item: string) =>
       `⚠️ Власник видалив «${item}» зі списку «${list}», де було твоє бронювання. Його скасовано.`,
+    itemRemovedPurchased: (list: string, item: string) =>
+      `⚠️ Власник прибрав «${item}» зі списку «${list}». Твоя позначка «придбано» збережена — знайдеш її в «🎁 Мої бронювання».`,
     listDeleted: (list: string) => `🗑 Власник видалив список «${list}». Твоє бронювання там більше не активне.`,
     listArchived: (list: string) => `📦 Список «${list}» закрито власником. Нові бронювання більше не приймаються.`,
   },

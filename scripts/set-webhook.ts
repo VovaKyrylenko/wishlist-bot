@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getBot } from "../src/bot.js";
+import { getBot, syncBotCommands } from "../src/bot.js";
 
 async function main() {
   const url = process.env.WEBHOOK_URL;
@@ -15,6 +15,7 @@ async function main() {
 
   const bot = getBot();
   await bot.api.setWebhook(url, { secret_token: secret });
+  await syncBotCommands(bot);
   const info = await bot.api.getWebhookInfo();
   console.log("✅ Webhook set:", info);
 }

@@ -24,6 +24,7 @@ model User {
   editorAccess  WishlistEditor[]
   reservations  Reservation[]
   subscriptions Subscription[]
+  visits        WishlistVisit[]
 
   @@index([telegramId])
 }
@@ -49,14 +50,24 @@ model Wishlist {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  /// Owner can mute per-reservation pings without losing the list itself.
+  notifyOwner Boolean @default(true)
+  /// Single-use secret behind the "add editor" deep link; null when no invite is open.
+  editorInviteToken String? @unique
+  /// Set once the pre-event reminder for the current `eventDate` has gone out,
+  /// so the cron never sends it twice. Cleared whenever `eventDate` changes.
+  reminderSentAt DateTime?
+
   ownerId String
   owner   User   @relation("OwnedWishlists", fields: [ownerId], references: [id], onDelete: Cascade)
 
   items         WishlistItem[]
   editors       WishlistEditor[]
   subscriptions Subscription[]
+  visits        WishlistVisit[]
 
   @@index([ownerId])
+  @@index([eventDate])
 }
 
 model WishlistEditor {
@@ -100,7 +111,7 @@ model WishlistItem {
 
   reservations Reservation[]
 
-  @@index([wishlistId])
+  @@index([wishlistId, status])
 }
 
 enum ReservationStatus {
@@ -133,7 +144,36 @@ model Subscription {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
 
+  /// Watermark for the digest cron: everything added after this has not been
+  /// announced yet. Notifying per item turned a 20-gift evening into 20 pings.
+  lastNotifiedAt DateTime @default(now())
+
   @@unique([wishlistId, userId])
+}
+
+/// Remembers that a guest opened someone's list, so they can find it again
+/// without having reserved or subscribed. Guests who follow a share link and
+/// then close Telegram otherwise have no route back.
+model WishlistVisit {
+  id         String   @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastSeenAt DateTime @default(now())
+
+  @@unique([wishlistId, userId])
+  @@index([userId, lastSeenAt])
+}
+
+/// Telegram re-delivers an update when the webhook is slow to answer, which
+/// used to double-add items and double-book gifts. Seeing an update_id here
+/// means it has already been handled.
+model ProcessedUpdate {
+  updateId  BigInt   @id
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // Persists grammY conversation/session state across serverless webhook invocations.
