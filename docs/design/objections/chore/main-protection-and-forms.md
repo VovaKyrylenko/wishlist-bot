@@ -33,7 +33,7 @@ Scope: what the assistant may do is only the in-repo part. Repository rulesets, 
 
 # Objection log
 
-[OBJ-1] candidate: plan | lens: - | severity: major | status: accepted-risk
+[OBJ-1] candidate: plan | severity: major | status: accepted-risk
 CLAIM:      A bypass actor (repo admin, mode pull_request) is the identity the assistant merges with, so "a PR needs a green quality" is not delivered to the one caller it must constrain.
 EVIDENCE:   gh api repos/VovaKyrylenko/wishlist-bot shows permissions.admin=true, owner.type=User; a bypass actor merges without waiting for required checks.
 SCENARIO:   `gh pr merge` on a red or pending PR succeeds, and the push to main runs the Release workflow (tag + channel post).
@@ -41,7 +41,7 @@ BAR:        The ruleset binds the owner's own token, or the loophole is stated a
 HISTORY:    r1 open (design-adversary) -> r1 proposed (orchestrator-as-advocate: `bypass_actors` is an empty list; the emergency path is the owner disabling the ruleset with one API call, which leaves an audit trail; the assistant's merge procedure is `gh pr checks --watch` then `gh pr merge --squash`, written into the ADR)
             -> r2 accepted-risk (design-adversary review pass: payload holds the mechanism (bypass_actors == [] is asserted; mutation makes `check` exit 1); the load-bearing claim that the owner's `gh pr merge --squash` is refused while `quality` is pending cannot be tested before apply, and the ADR's Risks accepted says so; bounded: at worst the owner's token merges a red PR and a chore:/docs: title does not publish)
 
-[OBJ-2] candidate: plan | lens: - | severity: major | status: verified
+[OBJ-2] candidate: plan | severity: major | status: verified
 CLAIM:      The jq checks cannot fail on the ways the payload can silently not protect main (enforcement disabled, wrong include, missing required booleans, `quality` not equal to the ci.yml job id, no integration_id).
 EVIDENCE:   Criterion 5 tested two facts only; GitHub docs https://docs.github.com/en/rest/repos/rules list required pull_request and required_status_checks fields.
 SCENARIO:   A payload with enforcement "disabled" passes and protects nothing; a missing boolean gives a 422 only when the owner applies it.
@@ -51,7 +51,7 @@ HISTORY:    r1 open (design-adversary) -> r1 proposed (advocate: scripts/main-pr
             -> r2 proposed (advocate: DESIGN now asserts every value; `check` also rejects a `name:` on the quality job; 9 mutations of the payload and ci.yml all rejected)
             -> r3 verified (design-adversary review pass round 2: 17 payload mutations and 5 ci.yml mutations run; all payload mutations exit 1; the earlier gaps (values not asserted, name: invisible) are closed)
 
-[OBJ-3] candidate: plan | lens: - | severity: major | status: verified
+[OBJ-3] candidate: plan | severity: major | status: verified
 CLAIM:      Squash message BLANK drops BREAKING CHANGE footers, which scripts/release/notes.ts reads; the plan also never states the PR title type.
 EVIDENCE:   scripts/release/notes.ts: `commits.some((c) => c.breaking || c.body.includes("BREAKING CHANGE"))`; body is read with %b.
 SCENARIO:   A PR body says "BREAKING CHANGE: old links stop working"; after squash the body is empty, the release is minor, the notes lack the warning. A feat:/fix: title on a docs change would tag a release and post to the channel.
@@ -59,7 +59,7 @@ BAR:        Breaking changes remain signalable, and the PR-title rule is written
 HISTORY:    r1 open (design-adversary) -> r1 proposed (advocate: keep BLANK, because a PR body would put the AI-attribution line into main's history, which the kit forbids in commits; the ADR states that breaking changes must use `type!:` in the PR title, which notes.ts reads from the subject; the PR for this issue is titled `chore:`)
             -> r2 verified (design-adversary review pass: notes.ts:66 regex run on `feat!: change link format (#12)` gives type feat and breaking set; notes.ts:292 reads body; ADR Consequences states the `type!:` rule; CLAUDE.md:23 and guard-ai-attribution.sh confirm the attribution rule)
 
-[OBJ-4] candidate: plan | lens: - | severity: minor | status: verified
+[OBJ-4] candidate: plan | severity: minor | status: verified
 CLAIM:      The issue-form check passes forms GitHub would reject (only-markdown body, no name/description).
 EVIDENCE:   Adversary ran the one-liner against such forms; both exit 0.
 SCENARIO:   A documentation.yml without `description` is green here and rejected by the chooser.
@@ -107,7 +107,7 @@ BAR:        A check extracts every «…» from the forms and finds it in src/te
 HISTORY:    r1 open (design-adversary lens: content-copy) -> r1 proposed (advocate: added as criterion 4; the documentation form quotes no bot strings so it stays out of scope of the check)
             -> r2 verified (design-adversary review pass: check passes real files and reports a scratch «➕ Створити всесвіт» as MISSING; loose substring match accepted for a minor item)
 
-[OBJ-10] candidate: plan | lens: - | severity: minor | status: verified
+[OBJ-10] candidate: plan | severity: minor | status: verified
 CLAIM:      "NOT VERIFIABLE by the assistant" is wrong: read-only calls (rules/branches/main and the repo GET) can verify the applied state.
 EVIDENCE:   `gh api repos/VovaKyrylenko/wishlist-bot/rules/branches/main` returns [] today; the repo GET gives the merge settings.
 SCENARIO:   The owner applies a wrong --input and nothing is applied; the hand-off still says UNKNOWN and nobody notices.
@@ -115,7 +115,7 @@ BAR:        A post-apply verification exists and is runnable by anyone.
 HISTORY:    r1 open (design-adversary) -> r1 proposed (advocate: `scripts/main-protection.sh verify` reads both endpoints and exits non-zero on any difference; the ADR lists it as the last step; the criterion becomes UNKNOWN only until it is run)
             -> r2 verified (design-adversary review pass: `verify` exits 1 today against the live repo (rules in effect: ''), live GET /rulesets returns [])
 
-[OBJ-11] candidate: plan | lens: - | severity: minor | status: verified
+[OBJ-11] candidate: plan | severity: minor | status: verified
 CLAIM:      The assistant's merge command, the ADR's rollback (ruleset id), idempotency and apply order are undefined.
 EVIDENCE:   allow_auto_merge is false, so `gh pr merge --auto` fails; a second POST of the same payload duplicates or 422s.
 SCENARIO:   The assistant retries with --admin after the first rejection (see OBJ-1).
@@ -123,7 +123,7 @@ BAR:        The ADR states the merge procedure, the rollback with id lookup, and
 HISTORY:    r1 open (design-adversary) -> r1 proposed (advocate: ADR sections "How merges work afterwards", "Apply", "Roll back"; order is merge settings, then ruleset; auto-merge stays off, because nothing asked for it)
             -> r2 verified (design-adversary review pass: ADR has How merges work afterwards, Apply (order, duplicate warning) and Roll back (id lookup); allow_auto_merge is false live)
 
-[OBJ-12] candidate: plan | lens: - | severity: note | status: verified
+[OBJ-12] candidate: plan | severity: note | status: verified
 CLAIM:      The bypass actor_id 5 for the admin role is not in official docs.
 EVIDENCE:   github/rest-api-description issue #4406.
 SCENARIO:   A wrong mapping gives a 422 or the wrong role bypassing.
@@ -139,7 +139,7 @@ BAR:        Stated as out of scope and reported at hand-off.
 HISTORY:    r1 open (design-adversary lens: content-copy) -> r1 proposed (advocate: accepted-risk: the description is a public repository setting and package.json carries the owner's uncommitted edits; both are named in the report)
             -> r2 accepted-risk (design-adversary review pass: live repo GET shows the description; named in the ADR's Risks accepted; cosmetic, bounded to one public page)
 
-[OBJ-14] candidate: plan | lens: - | severity: major | status: verified
+[OBJ-14] candidate: plan | severity: major | status: verified
 CLAIM:      `verify` reports "protected as designed" for any ruleset that merely contains the five rule types; it never reads parameters, bypass actors or enforcement.
 EVIDENCE:   Review pass ran verify with a stubbed gh returning approvals=1, allowed_merge_methods ["squash","merge"], context "other": output "ok", rc 0.
 SCENARIO:   The owner applies a payload edited to 1 approval or with a bypass actor; verify says ok, so "applied" is believed while the design is not in force.
@@ -147,7 +147,7 @@ BAR:        verify asserts the same design as `check` on what GitHub reports, pl
 HISTORY:    r2 open (design-adversary review pass) -> r2 proposed (advocate: the design is one jq definition used by both commands; verify asserts every parameter of the rules in effect, that exactly one ruleset applies, and reads GET rulesets/<id> for enforcement == active and bypass_actors == []; tested against a stub gh: 1 positive and 10 negatives)
             -> r3 verified (design-adversary review pass round 2: verify tested against GitHub-shaped fixtures (extra keys, parameterless rules, current_user_can_bypass): positive passes rc 0; 16 negatives fail with the right message; live run against the real repo exits 1 before apply; bound: the real echo is checked against the documented schema, not a captured response, and an undocumented extra key in a check object would fail closed)
 
-[OBJ-15] candidate: plan | lens: - | severity: minor | status: verified
+[OBJ-15] candidate: plan | severity: minor | status: verified
 CLAIM:      The branch had a `fix:` commit; under the old merge settings a rebase or merge commit would carry it into main and publish an announcement about issue templates.
 EVIDENCE:   git log ecfd4a5 "fix: give the bug and idea forms…"; live allow_merge_commit and allow_rebase_merge are true; notes.ts reads `git log --no-merges`.
 SCENARIO:   The owner clicks the UI merge button instead of `gh pr merge --squash`.
@@ -155,7 +155,7 @@ BAR:        No release-worthy type in the commits of this branch, and the ADR sa
 HISTORY:    r2 open (design-adversary review pass) -> r2 proposed (advocate: the commit is retitled `docs:`; the ADR states that this PR is squash-merged with a `chore:` title)
             -> r3 verified (design-adversary review pass round 2: git log --format=%s origin/main..HEAD has no feat/fix/perf; notes.ts SKIP_TYPES contains chore and docs)
 
-[OBJ-16] candidate: plan | lens: - | severity: minor | status: verified
+[OBJ-16] candidate: plan | severity: minor | status: verified
 CLAIM:      The rollback for merge settings is not a copy-pasteable command and the prior values are not recorded.
 EVIDENCE:   ADR said merge settings "can be set back the same way"; pre-apply live values: merge and rebase allowed, delete_branch_on_merge false, title COMMIT_OR_PR_TITLE, message COMMIT_MESSAGES.
 SCENARIO:   Someone has to reconstruct the previous settings during an incident.
@@ -163,7 +163,7 @@ BAR:        The reverse PATCH is in the ADR with the recorded values.
 HISTORY:    r2 open (design-adversary review pass) -> r2 proposed (advocate: reverse PATCH added to Roll back, values recorded 2026-09-20)
             -> r3 verified (design-adversary review pass round 2: ADR values equal the live pre-apply GET (merge true, rebase true, delete false, COMMIT_OR_PR_TITLE, COMMIT_MESSAGES); both PATCH pairings valid)
 
-[OBJ-17] candidate: plan | lens: - | severity: note | status: verified
+[OBJ-17] candidate: plan | severity: note | status: verified
 CLAIM:      Two ADR statements were wrong ("kit-guards needs the base branch's guard to exist"; "a ruleset applied earlier blocks the PR"), and the ruleset's public-repository dependency was not stated.
 EVIDENCE:   kit-guards.yml:19-24 falls back to the branch's own guard; a green squash PR merges under the ruleset; GitHub docs: rulesets on Free plans are public-repo only.
 SCENARIO:   A reader acts on a wrong reason.
@@ -171,14 +171,14 @@ BAR:        The ADR states only true reasons.
 HISTORY:    r2 open (design-adversary review pass) -> r2 proposed (advocate: both sentences rewritten, the public-repo dependency added to Consequences)
             -> r3 verified (design-adversary review pass round 2: kit-guards.yml:19-24 falls back to the branch's script; the ADR now says a green squash PR still merges under the ruleset; live repo is public)
 
-[OBJ-18] candidate: plan | lens: - | severity: minor | status: proposed
+[OBJ-18] candidate: plan | severity: minor | status: proposed
 CLAIM:      `check` says "quality is a real job id" but cannot see a `strategy:` matrix or a `paths:` filter, which also make the required check never report.
 EVIDENCE:   Review pass round 2 added each to ci.yml; `check` returned ok for both.
 SCENARIO:   A later CI edit passes `check` and leaves every PR, or every docs PR, waiting on a required check.
 BAR:        `check` rejects both, or the ADR states its limit.
 HISTORY:    r3 open (design-adversary review pass round 2) -> r3 proposed (advocate: `check` rejects name:, strategy: inside the quality job and paths:/paths-ignore: anywhere in ci.yml, and accepts a trailing comment after `quality:`; negative controls run: 4 rejected, 1 valid edit accepted; the ADR names all four)
 
-[OBJ-19] candidate: plan | lens: - | severity: note | status: proposed
+[OBJ-19] candidate: plan | severity: note | status: proposed
 CLAIM:      `verify` says "not active or has bypass actors" when the caller cannot read bypass_actors (no write access), which is misleading.
 EVIDENCE:   GitHub docs: bypass_actors is returned only to a caller with write access to the ruleset.
 SCENARIO:   A collaborator without admin is told the ruleset has bypass actors when it does not.
@@ -188,7 +188,7 @@ HISTORY:    r3 open (design-adversary review pass round 2) -> r3 proposed (advoc
 # Revised acceptance criteria (after r1)
 
 - [ ] documentation.yml is a valid issue form: non-empty name and description, labels exactly ["documentation","triage"], at least one non-markdown field, every non-markdown field with a unique id and a label.
-      check: ruby -Ku -ryaml -e 'd=YAML.load_file(".github/ISSUE_TEMPLATE/documentation.yml"); f=d["body"].reject{|b| b["type"]=="markdown"}; ids=f.map{|b| b["id"]}; abort "bad" unless d["name"].to_s.size>0 && d["description"].to_s.size>0 && d["labels"]==["documentation","triage"] && f.size>0 && ids.uniq.size==ids.size && f.all?{|b| b["attributes"]["label"].to_s.size>0}'
+      check: ruby -Ku -ryaml -e 'd=YAML.load_file(".github/ISSUE_TEMPLATE/documentation.yml"); f=d["body"].reject{|b| b["type"]=="markdown"}; ids=f.map{|b| b["id"]}; abort "bad" unless d["name"].to_s.size>0 && d["description"].to_s.size>0 && d["labels"]==["documentation","triage"] && f.size>0 && ids.none?(&:nil?) && ids.uniq.size==ids.size && f.all?{|b| b["attributes"]["label"].to_s.size>0}'
 - [ ] All three forms exist and carry the `triage` label.
       check: ruby -Ku -ryaml -e '%w[bug_report feature_request documentation].each{|n| p=".github/ISSUE_TEMPLATE/#{n}.yml"; abort "missing #{p}" unless File.file?(p); abort "no triage in #{p}" unless YAML.load_file(p)["labels"].include?("triage")}'
 - [ ] None of the three forms contains a banned stem (case-folded), and all three files exist.
