@@ -9,7 +9,7 @@
     "dev": "tsx watch scripts/dev-polling.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
+    "lint": "biome check",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "webhook:set": "tsx scripts/set-webhook.ts",
@@ -30,15 +30,13 @@
     "grammy": "^1.45.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@biomejs/biome": "2.5.14",
     "@types/node": "^26.1.2",
     "@vercel/node": "^5.8.27",
     "@vitest/coverage-v8": "^5.0.1",
-    "eslint": "^10.8.0",
     "prisma": "^7.9.1",
     "tsx": "^4.23.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.65.0",
     "vitest": "^5.0.1"
   },
   "engines": {
