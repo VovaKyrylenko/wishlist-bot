@@ -111,16 +111,17 @@ describe("fetchLinkPreview - a pasted link must never make the server call inwar
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  // A fetch that behaves like the real one. Asked to follow redirects itself it lands on
-  // the final page without the guard seeing that hop; asked to leave them alone it hands
-  // back the 302. That is what makes `redirect: "manual"` observable through behaviour.
+  // A fetch that behaves like the real one. Real fetch follows redirects itself unless it is
+  // told `redirect: "manual"`, so anything else (a different value, or no option at all)
+  // lands on the final page without the guard seeing that hop, while "manual" hands back the
+  // 302. Only then does deleting the option, not just changing it, fail a test.
   const publicName = () => dns.lookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
   const redirectTo = (location: string) => new Response(null, { status: 302, headers: { location } });
 
   it("never lets fetch follow a redirect on its own", async () => {
     publicName();
     fetchMock.mockImplementation(async (_url: unknown, init?: RequestInit) =>
-      init?.redirect === "follow" ? html() : redirectTo("http://169.254.169.254/"),
+      init?.redirect === "manual" ? redirectTo("http://169.254.169.254/") : html(),
     );
     expect(await fetchLinkPreview("https://shop.example/p")).toBeNull();
   });

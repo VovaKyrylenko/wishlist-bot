@@ -58,6 +58,7 @@ mutants() {
         src/lib/scrape.ts 's#a >= 224#a >= 225#' \
         src/lib/scrape.ts 's#b >= 16 [&][&] b <= 31#b >= 16 \&\& b <= 32#' \
         src/lib/scrape.ts 's#redirect: "manual"#redirect: "follow"#' \
+        src/lib/scrape.ts '/redirect: "manual",/d' \
         src/lib/scrape.ts 's#MAX_REDIRECTS = 3#MAX_REDIRECTS = 100#' \
         src/lib/scrape.ts 's#\(b === 18 \|\| b === 19\)#(b === 18)#' \
         src/lib/scrape.ts 's#b >= 64 [&][&] b <= 127#b >= 64 \&\& b <= 126#'
