@@ -49,5 +49,50 @@ protocol deviation, stated plainly: the plan was NOT put through an adversary pa
       manual: read docs/decisions/0005-adopt-pnpm-and-pin-node.md -> evidence: the mapping table
 - [ ] On the pull request, the `quality` run installs with pnpm and a frozen lockfile, runs on Node 24 and is green; the announcement preview and guards are green.
       manual: open the PR's runs -> evidence: the run links and the Node/pnpm version lines, recorded in docs/verification/build/adopt-pnpm-pin-node.md
-- [ ] THE HOLD-BACK CRITERION (not verifiable by the assistant): a Vercel preview or production build of this branch detects pnpm 10, uses Node 24.x, runs `prisma generate` and `prisma migrate deploy` successfully, and `/api/webhook` and `/api/cron` answer.
-      manual: the owner deploys a preview of the branch (Vercel dashboard or `vercel deploy`) and reads its build log -> evidence: the "Detected pnpm" and Node version lines and a successful webhook/cron response; UNKNOWN until then, and this pull request is not merged before it
+- [ ] The Vercel build (the criterion no assistant can read): after this is merged, the first production build detects pnpm 10, uses Node 24.x, runs `prisma generate` and `prisma migrate deploy` successfully, and `/api/webhook` and `/api/cron` answer.
+      manual: the owner reads the build log of the first deployment after the merge -> evidence: the "Detected pnpm" and Node version lines, and a webhook/cron response; UNKNOWN until then. The rollback is `git revert` of the squash commit (a failed Vercel build does not replace the live deployment, which is expected but was not observed here).
+
+# Objection log
+
+[OBJ-1] candidate: plan | severity: major | status: proposed
+CLAIM:      None of the four workflows has ever run, and `pnpm/action-setup@v6` is a floating tag with open issues about pnpm pins, so the only proof the CI wiring works is reasoning.
+EVIDENCE:   review B: the branch was not pushed, no runs exist; v6 resolves to v6.1.0 (2026-09-05); open issues #268 (ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH with a pnpm 10 pin and no `version` input), #227/#225; the action reads `packageManager` when `version` is omitted (the documented shape).
+SCENARIO:   A patch under the v6 tag breaks the pin; `quality` (required) fails before merge, but kit-release.yml runs only on push to main and would stop releases silently.
+BAR:        A green `quality` run of this exact branch before merge, and the pnpm/Node lines read from its log.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: the branch is pushed and the pull request's own CI is the first run of all changed workflows except kit-release and flows; the pnpm and Node versions are read from the run log and recorded in docs/verification; kit-release.yml and flows.yml cannot run before merge and are accepted-risk in ADR 0005)
+
+[OBJ-2] candidate: plan | severity: major | status: proposed
+CLAIM:      Production (Vercel) does not necessarily install with the pinned pnpm: `packageManager` governs CI and local runs, not Vercel.
+EVIDENCE:   review B: Vercel docs say a lockfileVersion 9.0 pnpm-lock.yaml is interpreted by pnpm 9 or 10 and `packageManager` is used only with Corepack; vercel.json has no installCommand; pnpm 9.15.9 run against this `packageManager` field gave no error and a pnpm 10.34.5 clone installed cleanly.
+SCENARIO:   Vercel installs with pnpm 9 or another 10.x; peer/optional resolution or the build step under pnpm's layout differs.
+BAR:        Stated as an accepted risk, or ENABLE_EXPERIMENTAL_COREPACK=1 set, or the pnpm version read from a build log.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: accepted-risk written in ADR 0005 with its bound; the owner can set ENABLE_EXPERIMENTAL_COREPACK=1 in Vercel (an owner setting the assistant cannot change); the first production build log settles it)
+
+[OBJ-3] candidate: plan | severity: minor | status: proposed
+CLAIM:      The documented migration command is wrong under pnpm: `pnpm run prisma:migrate -- --name x` forwards the literal `--`.
+EVIDENCE:   review B: with a stub script the command line ended `-- --name x`; in a clone `-- --name zz --bogusflag` was not rejected while the same flags without `--` printed Prisma's usage error.
+SCENARIO:   The name flag is silently ignored and the contributor is prompted.
+BAR:        The line says `pnpm run prisma:migrate --name опис`.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: CONTRIBUTING.md fixed; my generic npm->pnpm replacement had run before the specific one and left the `--`)
+
+[OBJ-4] candidate: plan | severity: minor | status: proposed
+CLAIM:      Every install prints "Ignored build scripts: prisma@7.9.1".
+EVIDENCE:   review B: clean frozen install prints it; prisma generate, the schema engine, tsx (esbuild), vitest, typecheck, lint, build and tests all work, so the allowlist is correct.
+SCENARIO:   Noise in every CI log; a future reader thinks something is broken.
+BAR:        Silenced or documented.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: `pnpm.ignoredBuiltDependencies: ["prisma"]` was tried and did NOT silence the warning, so it was not kept; the warning is documented in CONTRIBUTING and ADR 0005)
+
+[OBJ-5] candidate: plan | severity: minor | status: proposed
+CLAIM:      A contributor without pnpm gets a broken pre-commit hook, and plain `npm install` crashes on a pnpm-managed node_modules.
+EVIDENCE:   review B: .githooks run `pnpm run …` from RUNNER with no command-not-found handling; `npm install --dry-run` on pnpm's node_modules failed with "Cannot read properties of null (reading 'matches')"; Corepack downloads pnpm 10.34.5 on first use; Node 20 gives only a WARN.
+SCENARIO:   Every commit is blocked for someone with only npm.
+BAR:        CONTRIBUTING says pnpm only.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: CONTRIBUTING says pnpm only and names the warning; accepted-risk in ADR 0005)
+
+[OBJ-6] candidate: plan | severity: note | status: proposed
+CLAIM:      The open Dependabot pull request #12 will conflict after the merge (the npm lockfile is deleted); PR #3 is already closed.
+EVIDENCE:   `gh pr view 3` CLOSED; #12 on branch dependabot/npm_and_yarn/npm-minor-patch-17915bf4d9; dependabot.yml package-ecosystem npm covers pnpm; reports of Dependabot rewriting pnpm lockfiles' quoting style and of pnpm 11 multi-document lockfiles (not applicable to a pnpm 10 pin).
+SCENARIO:   A stale Dependabot pull request.
+BAR:        Stated.
+HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: accepted-risk in ADR 0005; the owner may close #12 and let Dependabot recreate it)
+

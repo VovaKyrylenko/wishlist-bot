@@ -5,7 +5,7 @@
 ## Швидкий старт
 
 1. Форкніть репозиторій і склонуйте свій форк.
-2. Потрібні Node (24; підійде й 22.12+, див. `engines` у `package.json` та `mise.toml`) і pnpm: версію pnpm береться з `packageManager`, тож достатньо будь-якого pnpm 10+ (`npm i -g pnpm`). Далі `pnpm install` (заодно виконає `prisma generate`).
+2. Потрібні Node (24; підійде й 22.12+, див. `engines` у `package.json` та `mise.toml`) і pnpm: версію pnpm береться з `packageManager`, тож достатньо будь-якого pnpm 10+ (`npm i -g pnpm`). Далі `pnpm install` (заодно виконає `prisma generate`). Лише pnpm: звичайний `npm install` у цьому каталозі падає. Під час встановлення pnpm друкує «Ignored build scripts: prisma»: це очікувано й безпечно.
 3. Створіть власного тестового бота через [@BotFather](https://t.me/BotFather) і свою Neon/Postgres базу — не використовуйте продакшн-дані.
 4. Скопіюйте `.env.example` → `.env`, заповніть `BOT_TOKEN`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED`.
 5. `pnpm run prisma:migrate`, потім `pnpm run dev` — бот піднімається через long polling, деплой не потрібен.
@@ -17,7 +17,7 @@
 - `pnpm run typecheck`, `pnpm run lint` і `pnpm test` мають проходити без помилок.
 - Змінили `src/features/`, `api/` чи `prisma/` — запустіть ще й `pnpm run verify:flows` (див. «Тести» нижче).
 - Перевірте зміну вручну через `pnpm run dev`: бот невеликий, ручна перевірка сценарію швидша й надійніша за будь-які тести з моками.
-- Якщо змінили `prisma/schema.prisma` — додайте міграцію (`pnpm run prisma:migrate -- --name опис_зміни`) і закомітьте `prisma/migrations/`.
+- Якщо змінили `prisma/schema.prisma` — додайте міграцію (`pnpm run prisma:migrate --name опис_зміни`) і закомітьте `prisma/migrations/`.
 
 ## Тести
 

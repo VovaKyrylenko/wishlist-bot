@@ -1,6 +1,6 @@
 # 0005: Adopt pnpm 10 and pin Node through engines
 
-Status: proposed (not to be merged before the Vercel criterion below is settled by the owner)
+Status: accepted (merged on the owner's instruction without a Vercel build check, which no assistant can do; see Consequences)
 Date: 2026-09-20
 
 ## Context
@@ -27,7 +27,8 @@ Issue #6 asked to move from npm to pnpm and to pin the Node version. The catalog
 - A new dependency that needs an install script will not build until it is added to the allowlist (pnpm 10 warns "Ignored build scripts"; pnpm 11 would fail).
 - **The owner's uncommitted work:** `package.json` merges cleanly with the owner's (checked with their HEAD as the base), but `pnpm-lock.yaml` will need regenerating after their rewrite lands, and `README.md` still says `npm` until they commit their own edits to it.
 - **Earlier ADRs' criteria that name npm** are to be read with these equivalents: `npm run X` -> `pnpm run X`, `npm test` -> `pnpm test`, `npm ci --dry-run` -> `pnpm install --frozen-lockfile`, `npm ls P` -> `pnpm ls P`, `package-lock.json` -> `pnpm-lock.yaml`, `npx vitest` -> `pnpm exec vitest`; in ADR 0003 that concerns criteria 1, 2, 20, 21, 23, 25 (the hook now prints `kit pre-push: pnpm run test`), 29 (the lockfile-engines part is dropped: pnpm-lock.yaml has no root engines) and 30 (`run: pnpm test`), and in ADR 0004 criteria 1, 2 and 12.
-- **Unverified, needs a real Vercel build:** that the build image honours the `packageManager` pin (or picks pnpm 10 from the lockfile), which pnpm 10.x patch it ships, that `prisma migrate deploy` works with the allowlist under Vercel, that Node 24.x is used, and that `/api/webhook` and `/api/cron` answer. Until the owner checks a preview build, this pull request is not merged.
+- **Unverified, needs a real Vercel build:** that the build image honours the `packageManager` pin (or picks pnpm 10 from the lockfile), which pnpm 10.x patch it ships, that `prisma migrate deploy` works with the allowlist under Vercel, that Node 24.x is used, and that `/api/webhook` and `/api/cron` answer. The assistant recommended a preview build first; the owner instructed it to finish and merge, so the first production build is the test. A failed Vercel build does not replace the live deployment (expected, not observed here); the rollback is a revert.
+- **Accepted risks, with bounds:** (1) the pnpm version on Vercel is not pinned: Vercel honours `packageManager` only with Corepack (`ENABLE_EXPERIMENTAL_COREPACK=1`, an owner setting in the dashboard), otherwise it takes pnpm 9 or 10 from the lockfile version and the project's age; a lockfile from pnpm 10.34.5 installed cleanly under pnpm 9.15.9 in the review, so nothing is expected to break. (2) `pnpm/action-setup@v6` is a floating tag with open issues about pnpm pins; its first run is this pull request's CI, and a failure in `kit-release.yml` (only on push to main) would stop releases silently. (3) Function bundling under pnpm's symlinked `node_modules` on Vercel was not observed. (4) The open Dependabot pull request (#12) conflicts after this merge (the npm lockfile is gone) and Dependabot will recreate it; its handling of pnpm lockfiles was not observed. (5) Every install prints "Ignored build scripts: prisma@7.9.1" (prisma has only a Node-version guard); an `ignoredBuiltDependencies` entry did not silence it and was not kept. (6) A contributor who has only npm gets a failing pre-commit hook and `npm install` crashes on a pnpm-managed `node_modules`; CONTRIBUTING says pnpm only.
 - Revisit when: Vercel supports pnpm 11+ (then move the allowlist), Node 24 leaves maintenance (2028-04-30) or Vercel drops it, or a dependency needs an install script.
 
 ## Acceptance criteria
@@ -66,8 +67,8 @@ Issue #6 asked to move from npm to pnpm and to pin the Node version. The catalog
       manual: read docs/decisions/0005-adopt-pnpm-and-pin-node.md -> evidence: the mapping table
 - [ ] On the pull request, the `quality` run installs with pnpm and a frozen lockfile, runs on Node 24 and is green; the announcement preview and guards are green.
       manual: open the PR's runs -> evidence: the run links and the Node/pnpm version lines, recorded in docs/verification/build/adopt-pnpm-pin-node.md
-- [ ] THE HOLD-BACK CRITERION (not verifiable by the assistant): a Vercel preview or production build of this branch detects pnpm 10, uses Node 24.x, runs `prisma generate` and `prisma migrate deploy` successfully, and `/api/webhook` and `/api/cron` answer.
-      manual: the owner deploys a preview of the branch (Vercel dashboard or `vercel deploy`) and reads its build log -> evidence: the "Detected pnpm" and Node version lines and a successful webhook/cron response; UNKNOWN until then, and this pull request is not merged before it
+- [ ] The Vercel build (the criterion no assistant can read): after this is merged, the first production build detects pnpm 10, uses Node 24.x, runs `prisma generate` and `prisma migrate deploy` successfully, and `/api/webhook` and `/api/cron` answer.
+      manual: the owner reads the build log of the first deployment after the merge -> evidence: the "Detected pnpm" and Node version lines, and a webhook/cron response; UNKNOWN until then. The rollback is `git revert` of the squash commit (a failed Vercel build does not replace the live deployment, which is expected but was not observed here).
 
 ## Supersedes
 
