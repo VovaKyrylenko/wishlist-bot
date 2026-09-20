@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Runs the profile's TYPECHECK and LINT before every commit — including HUMAN commits,
+# which the Claude-level guards never see. Rejects, never rewrites: a hook that edits
+# files mid-commit confuses the very agent it is guarding.
+#
+# Deliberate bypass: KIT_SKIP_HOOKS=1 git commit …
+
+set -uo pipefail
+[ "${KIT_SKIP_HOOKS:-0}" = "1" ] && exit 0
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+profile="$root/.claude/kit.md"
+[ -f "$profile" ] || exit 0
+
+get() {
+  awk -F'|' -v k="$1" 'NF>=3 { g=$2; v=$3
+    gsub(/^[ \t]+|[ \t]+$/,"",g); gsub(/^[ \t]+|[ \t]+$/,"",v)
+    if (g==k) { print v; exit } }' "$profile"
+}
+
+run_key() { # run_key <KEY> -> 0 ok / 1 failed
+  local v cmd runner
+  v="$(get "$1")"
+  case "$v" in ''|none|NEEDS_CONFIGURATION) return 0 ;; raw:*) cmd="${v#raw:}" ;;
+    *) runner="$(get RUNNER)"
+       case "$runner" in ''|none|NEEDS_CONFIGURATION) return 0 ;; esac
+       cmd="$runner $v" ;;
+  esac
+  printf 'kit pre-commit: %s\n' "$cmd"
+  ( cd "$root" && eval "$cmd" )
+}
+
+failed=0
+run_key TYPECHECK || failed=1
+run_key LINT      || failed=1
+
+if [ "$failed" -ne 0 ]; then
+  printf '\nkit pre-commit: fix the failure above, or bypass once with KIT_SKIP_HOOKS=1\n' >&2
+  exit 1
+fi
+exit 0

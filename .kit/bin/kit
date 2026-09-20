@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# kit — a universal workflow engine for Claude Code.
+#
+# Deliberately POSIX shell plus git and jq: the kit must not require the language
+# runtime of the project it is managing, or it stops being stack-agnostic.
+
+set -euo pipefail
+
+# --- locate the kit, following symlinks ------------------------------------
+# `kit` is normally reached through a symlink on PATH, so $0 is not the real file.
+_kit_resolve() {
+  local target="$1" dir
+  while [ -L "$target" ]; do
+    dir="$(cd -P "$(dirname -- "$target")" && pwd)"
+    target="$(readlink -- "$target")"
+    case "$target" in /*) ;; *) target="$dir/$target" ;; esac
+  done
+  cd -P "$(dirname -- "$target")" && pwd
+}
+
+KIT_BIN="$(_kit_resolve "${BASH_SOURCE[0]}")"
+KIT_HOME="$(cd -P "$KIT_BIN/.." && pwd)"
+export KIT_HOME
+KIT_VERSION="0.1.0"
+
+# shellcheck source=../kit/lib/ui.sh
+. "$KIT_HOME/kit/lib/ui.sh"
+# shellcheck source=../kit/lib/profile.sh
+. "$KIT_HOME/kit/lib/profile.sh"
+# shellcheck source=../kit/lib/detect.sh
+. "$KIT_HOME/kit/lib/detect.sh"
+# shellcheck source=../kit/lib/lenses.sh
+. "$KIT_HOME/kit/lib/lenses.sh"
+# shellcheck source=../kit/lib/tastes.sh
+. "$KIT_HOME/kit/lib/tastes.sh"
+# shellcheck source=../kit/lib/design.sh
+. "$KIT_HOME/kit/lib/design.sh"
+# shellcheck source=../kit/lib/vendor.sh
+. "$KIT_HOME/kit/lib/vendor.sh"
+
+# Declared floors are checked, not just declared. Announcing a minimum version and never
+# testing it is the same shape of claim this kit exists to eliminate.
+command -v git >/dev/null 2>&1 || die "git is required (2.28 or newer)"
+command -v jq  >/dev/null 2>&1 || die "jq is required (1.6 or newer, for //= support)"
+
+_kit_version_at_least() { # _kit_version_at_least <have> <want>
+  [ "$(printf '%s\n%s\n' "$2" "$1" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$2" ]
+}
+
+_kit_git_version="$(git --version 2>/dev/null | awk '{print $3}')"
+_kit_version_at_least "${_kit_git_version:-0}" "2.28" \
+  || die "git ${_kit_git_version} is too old — 2.28 or newer is required (git init -b)"
+
+_kit_jq_version="$(jq --version 2>/dev/null | sed 's/^jq-//')"
+_kit_version_at_least "${_kit_jq_version:-0}" "1.6" \
+  || die "jq ${_kit_jq_version} is too old — 1.6 or newer is required (//= operator)"
+
+for _kit_tool in awk sed grep cut find xargs cmp basename dirname; do
+  command -v "$_kit_tool" >/dev/null 2>&1 || die "$_kit_tool is required but not on PATH"
+done
+
+usage() {
+  cat <<'EOF'
+kit — universal workflow engine for Claude Code
+
+  kit setup [--adopt] [--dry-run]  Put the kit on this project: init, vendor, doctor, next step
+  kit init [--dry-run] [--force]   Detect the stack and write .claude/kit.md, CLAUDE.md, rules
+  kit vendor [--ref REF]           Copy the engine into this project and pin it (.kit/ + MANIFEST)
+  kit update [--check] [--force]   Re-vendor at the pinned ref; --check reports and writes nothing
+  kit unvendor                     Remove the vendored engine and deregister its guards
+  kit doctor [--fix] [--quiet]     Verify a project against its profile; non-zero on any failure
+  kit design-check [PATH]          Apply the convergence test to an objection log; non-zero until it converges
+  kit diff-shape [BASE]            What this branch actually adds, by weight; fails on a swept-in payload
+  kit lenses [--ids]               The declared lenses' catalog entries, as the triage prompt embeds them
+  kit tastes [list|show|promote]   The catalog of default practices, and each entry's fingerprint
+  kit install [--dry-run]          Put kit on PATH (once per machine)
+  kit uninstall [--dry-run]        Remove everything install created
+  kit journal [--json] [--out F]   What the last run cost: agents, models, tokens, duration
+  kit eval guards [--since REF]    Replay real history through the guards; report false positives
+  kit eval ci [--limit N]          Replay real commits through the CI anti-gaming guard
+  kit eval profile [PATH]          Report what init would generate for an existing repository
+  kit version
+
+Run `kit <command> --help` for detail. Every command is safe to run twice.
+EOF
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift || true
+
+case "$cmd" in
+  setup)     . "$KIT_HOME/kit/commands/setup.sh";     kit_cmd_setup "$@" ;;
+  init)      . "$KIT_HOME/kit/commands/init.sh";      kit_cmd_init "$@" ;;
+  vendor)    . "$KIT_HOME/kit/commands/vendor.sh";    kit_cmd_vendor "$@" ;;
+  update)    . "$KIT_HOME/kit/commands/vendor.sh";    kit_cmd_update "$@" ;;
+  unvendor)  . "$KIT_HOME/kit/commands/vendor.sh";    kit_cmd_unvendor "$@" ;;
+  doctor)    . "$KIT_HOME/kit/commands/doctor.sh";    kit_cmd_doctor "$@" ;;
+  design-check) . "$KIT_HOME/kit/commands/design-check.sh"; kit_cmd_design_check "$@" ;;
+  lenses)    . "$KIT_HOME/kit/commands/lenses.sh";    kit_cmd_lenses "$@" ;;
+  diff-shape) . "$KIT_HOME/kit/commands/diff-shape.sh"; kit_cmd_diff_shape "$@" ;;
+  tastes)    . "$KIT_HOME/kit/commands/tastes.sh";    kit_cmd_tastes "$@" ;;
+  install)   . "$KIT_HOME/kit/commands/install.sh";   kit_cmd_install "$@" ;;
+  uninstall) . "$KIT_HOME/kit/commands/install.sh";   kit_cmd_uninstall "$@" ;;
+  journal)   . "$KIT_HOME/kit/commands/journal.sh";   kit_cmd_journal "$@" ;;
+  eval)      . "$KIT_HOME/kit/commands/eval.sh";      kit_cmd_eval "$@" ;;
+  version|--version|-v) printf 'kit %s (%s)\n' "$KIT_VERSION" "$KIT_HOME" ;;
+  help|--help|-h|"") usage ;;
+  *) die "unknown command '$cmd' — run 'kit help'" ;;
+esac

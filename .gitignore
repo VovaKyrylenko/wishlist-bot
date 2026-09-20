@@ -8,8 +8,12 @@ dist/
 
 /generated/prisma
 
-# Auto-installed by `prisma init` (AI agent doc skills) — not part of the project
-.claude/
+# Auto-installed by `prisma init` (AI agent doc skills) — not part of the project.
+# .claude/ itself is committed (kit guards, skills, profile): a clone must be a working
+# project. Only the prisma symlinks — they point into the ignored .agents/ and would
+# dangle on a fresh clone — and machine-local settings stay out.
+.claude/skills/prisma-*
+.claude/settings.local.json
 .windsurf/
 .agents/
 skills-lock.json

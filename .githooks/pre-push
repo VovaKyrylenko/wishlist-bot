@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Runs the profile's TEST_UNIT before a push. The last line of local defence: a broken
+# test suite that reaches the remote becomes everyone's problem within the hour.
+#
+# Deliberate bypass: KIT_SKIP_HOOKS=1 git push …
+
+set -uo pipefail
+[ "${KIT_SKIP_HOOKS:-0}" = "1" ] && exit 0
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+profile="$root/.claude/kit.md"
+[ -f "$profile" ] || exit 0
+
+get() {
+  awk -F'|' -v k="$1" 'NF>=3 { g=$2; v=$3
+    gsub(/^[ \t]+|[ \t]+$/,"",g); gsub(/^[ \t]+|[ \t]+$/,"",v)
+    if (g==k) { print v; exit } }' "$profile"
+}
+
+v="$(get TEST_UNIT)"
+case "$v" in ''|none|NEEDS_CONFIGURATION) exit 0 ;; raw:*) cmd="${v#raw:}" ;;
+  *) runner="$(get RUNNER)"
+     case "$runner" in ''|none|NEEDS_CONFIGURATION) exit 0 ;; esac
+     cmd="$runner $v" ;;
+esac
+
+printf 'kit pre-push: %s\n' "$cmd"
+if ! ( cd "$root" && eval "$cmd" ); then
+  printf '\nkit pre-push: tests failed — fix them, or bypass once with KIT_SKIP_HOOKS=1\n' >&2
+  exit 1
+fi
+exit 0
