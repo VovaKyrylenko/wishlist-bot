@@ -51,4 +51,9 @@ VERDICT: UNKNOWN
 EVIDENCE: `verify` exits 1 against the live repository ("rules in effect on main: ''"); `GET /rulesets` and `GET /rules/branches/main` both return `[]`. The assistant cannot apply admin settings.
 NOTE: becomes PASS when the owner runs the ADR's Apply commands and `bash scripts/main-protection.sh verify` then exits 0.
 
-SUMMARY: 7 PASS, 0 FAIL, 1 UNKNOWN (+ the PR-title criterion, recorded when the PR is opened).
+CRITERION: The PR for this issue is titled `chore:` (no release, no channel post).
+VERDICT: PASS
+EVIDENCE: PR #9 is titled "chore: protect main by design and tidy the issue forms (#5)", with no rename events; the release script's own regex (`scripts/release/notes.ts:66`) classifies the squash subject as `chore`, so `notable` is 0 and the release is skipped before any model call; all six commit subjects on the branch are `chore` or `docs`, so even a rebase or merge-commit merge releases nothing.
+NOTE: covers the title and commits as they stand at audit time; the kit-release workflow's handling of `skip=true` was not re-read by the auditor (it is the same one that skipped the release for #8).
+
+SUMMARY: 8 PASS, 0 FAIL, 1 UNKNOWN.
