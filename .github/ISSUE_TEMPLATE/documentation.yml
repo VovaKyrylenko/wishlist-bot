@@ -1,0 +1,28 @@
+name: 📄 Документація
+description: Щось у README чи описі бота застаріло, неточне або незрозуміле
+labels: ["documentation", "triage"]
+body:
+  - type: textarea
+    id: what-is-wrong
+    attributes:
+      label: Що не так
+      description: "Опиши коротко: що застаріло, помилкове чи незрозуміле."
+    validations:
+      required: true
+
+  # Maintainer-facing field: a file or section name may need a technical word.
+  - type: input
+    id: where
+    attributes:
+      label: Де це
+      description: Файл, розділ або посилання. Наприклад, розділ Cron у README.
+    validations:
+      required: false
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Як має бути
+      description: Якщо знаєш, як виправити, напиши.
+    validations:
+      required: false
