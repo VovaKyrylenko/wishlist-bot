@@ -1,77 +1,53 @@
-# CLAUDE.md
+# Project instructions
 
-Керівництво для Claude Code (та будь-кого, хто редагує текст бота) — архітектура коротко описана в [README.md](README.md); тут — про голос продукту.
+Read `.claude/kit.md` before doing repository work: commands, branch policy, risk triggers,
+testing policy. Architecture is in `README.md`. Do not restate either here.
 
-## Словник: обов'язковий
+## Product voice
 
-Редизайн ([docs/UX-REDESIGN.md](docs/UX-REDESIGN.md) §8.3) прибрав слова, які треба вивчати. Вони не повертаються — навіть у коментарях до користувацьких текстів.
+This is a Telegram bot for gift lists and its whole value is that anyone can use it. Every
+string a user sees follows `.claude/rules/voice.md` (loaded when you touch `src/`, `api/`
+or `docs/`): a banned-word vocabulary, one friendly tone, purple 💜 🟣 ✨ accents.
 
-| Ніколи | Завжди | Чому |
-|---|---|---|
-| вішліст | **список** (у заголовках — «список бажань») | англіцизм; літня людина не розуміє |
-| бажання, item | **подарунок** | гість і власник говорять одним словом |
-| бронювання, забронювати | **«Я подарую»** (дія), **обіцянка** (сутність) | «бронь» — з готелів |
-| придбано | **куплено** | коротше, розмовніше |
-| Мої бронювання | **🎗 Я дарую** | розділ називається наміром, не механікою |
-| Чужі списки | **Списки друзів** | «чужі» звучить відсторонено |
-| підписка, підписатися | **стежити 🔔 / не стежити** | дієслово зрозуміліше за іменник |
-| редактор | **співавтор** | «редактор» — професія, «співавтор» — стосунок |
-| архів, архівувати | **завершити список**, «Завершені» | подія минула, а не «здано в архів» |
-| приватність, режим | **режим сюрпризу: увімкнено/вимкнено** | один тумблер замість двох «режимів» |
-| ротація посилання | **закрити старе посилання** | описує наслідок |
-| пріоритет | **«Дуже хочу / Хочу / Було б приємно»** | технічний ярлик прибрано |
+- One test for any new term: **would a grandmother understand it?** If not, replace it.
+- All copy lives in `src/text.ts`; `src/features/*` holds no text literals.
+- Success, error and undo are the `notice` line of the live screen, never a separate message.
+- No jokes and no 💜 in errors and confirmations. Names appear only in the nominative case.
 
-Перевірка на новий термін одна: **зрозуміє бабуся?** Не пройшов — заміняй.
+## Enforced
 
-## Правила тексту (§14)
+A guard blocks these before the tool call runs and says so.
 
-1. Перший рядок = суть. Усе критичне — в перших 40 символах.
-2. Кнопка називає результат: «Так, відпустити подарунок», не «ОК». До 24 символів, дієсловом.
-3. Одне повідомлення — одна думка. Понад 6 рядків — розбити або скоротити.
-4. **У помилках і підтвердженнях — без жартів і без 💜.** Тон тримається на теплі, але не тоді, коли людина щось втрачає.
-5. Наслідок — до дії: у підтвердженні написано, що зміниться і для кого.
-6. Числа й дати по-людськи: «через 5 днів», «завтра» — не «2026-08-15».
-7. Статус — значок **і слово** разом («✅ вже дарують»), ніколи лише емодзі.
+- Committing on a protected branch (`main`); work on `type/short-description`.
+- Staging a secret file or credential.
+- An AI attribution trailer in a commit message: the author is the human.
 
-## Tone of voice: «Дружній друзяка»
+Each has a deliberate escape hatch named in the message it prints. Hooks in `.githooks/`
+re-run typecheck and lint on commit and push. In CI, deleting or skipping tests, lowering
+a coverage threshold, `continue-on-error`, or editing workflows without `[ci-change]` fails.
 
-Бот пише як хороший друг, що допомагає організувати подарунки — не як офіційний сервіс і не як стендап-комік.
+## Commands
 
-- **Звертання на «ти».** Ніякого «Ви» чи канцеляриту.
-- **Тепло, але коротко.** Один жарт чи теплий штрих на повідомлення — максимум два. Гумор не повинен затуляти суть чи сповільнювати користувача.
-- **Прямо, без бюрократії.** Замість «Операцію виконано успішно» — «Готово!». Замість «Даний елемент не знайдено» — «Не знайшов такий список 😕».
-- **Емпатія в помилках.** Коли щось не вдалось — визнай це по-людськи («Хм, не знайшов...»), не звинувачуй користувача.
+Never invent a command. Take it from `.claude/kit.md`, which names the script and lets the
+runner resolve it, so CI and this session run the same thing.
 
-Приклад до/після:
+## Ship, don't hoard
 
-| Було (нейтрально) | Стало (друзяка) |
-|---|---|
-| Список не знайдено. Можливо, посилання застаріло. | Хм, не знайшов такий список 😕 Може, посилання застаріло? |
-| ✅ Додано «Sony WH-1000XM6» до списку. | ✅ Додав «Sony WH-1000XM6» до списку. Гарний вибір! 💜 |
+Work accumulates on a feature branch, never in the working tree: commit each coherent
+unit with `/commit`, push with the first commit, open a PR with `/create-pr` when the
+branch answers its purpose, and file out-of-scope ideas with `/create-issue`. Decide the
+obvious yourself; a strategic question arrives at hand-off as a proposal with trade-offs.
 
-## Візуальний стиль: фіолетовий + сердечка + крапки
+## Workflow
 
-- **Фірмовий акцент — 💜.** Використовується в привітаннях, теплих підтвердженнях і на прощання. Не більше одного разу на повідомлення.
-- **🟣 — маркер списку/акцент**, коли потрібно виділити пункт чи статистику (замість голого тире чи дефіса).
-- **✨ — момент «щось нове/особливе»**: створення списку, перший доданий подарунок, копія списку.
-- **Функціональні емодзі не чіпаємо.** ✅ 🗑 📅 🔗 🔔 🔕 ⚙️ 🏁 🎁 ⚠️ ↩️ 🔥 💭 🤫 🤝 🎗 💨 — вони несуть конкретний сенс (успіх/видалення/дата/посилання тощо) і впізнавані з першого погляду. Стильові емодзі (💜 🟣 ✨) додаються ПОВЕРХ них, не замість.
-- **Пріоритет «Хочу» — без значка.** Це дефолт, який ніхто не обирав: якби він мав іконку, вона стояла б на кожному рядку і 🔥 не було б на чому виділятися.
-- **Кнопки — виняток.** Підписи кнопок залишаються короткими й функціональними без декоративних емодзі: користувач сканує кнопки очима за долі секунди, і зайва прикраса там шкодить, а не прикрашає.
-- **Не перевантажувати.** Якщо повідомлення й так коротке (алерт, підтвердження в один рядок) — досить одного емодзі загалом, стильового вже не треба.
+`/work-issue` implements a task end to end · `/investigate-codebase` before touching
+unfamiliar code · `/research` before adopting a dependency · `/verify-change` proves it
+runs (`npm run verify:flows` drives the bot with synthetic updates against a staging
+database) · `/review-diff` before merge · `/write-adr` for decisions · `/kit-doctor` when
+the setup misbehaves.
 
-## Імена людей — тільки в називному відмінку
+## Compact Instructions
 
-Українська просила б родовий («список **Марти**»), але ім'я — саме те слово, на якому наївне правило спотикається: «Марта» → «Марти», «Ілля» → «Іллі», «Дмитро» → «Дмитра», а далі починаються винятки. Неправильна форма чужого імені ріже око сильніше, ніж трохи суха конструкція, тож текст будується так, щоб ім'я лишалось як є:
-
-| ✗ | ✓ |
-|---|---|
-| `Список бажань Марта` | `🎂 День народження`<br>`Список бажань · Марта` |
-| `Список Марта › Навушники` | `🎂 День народження › Навушники` |
-
-Там, де ім'я природно стоїть у називному, воно вживається вільно: «Марта не побачить, що саме ти вибрав 🤫».
-
-## Де це живе в коді
-
-Усі тексти бота централізовані в [src/text.ts](src/text.ts) — єдине джерело правди для будь-якого повідомлення, яке бачить користувач. Змінюючи тон чи стиль, редагуй лише цей файл; логіка у `src/features/*` не повинна містити текстових літералів.
-
-Успіх, помилка й undo — це **не окремі повідомлення**, а рядок `notice` на екрані, який і так буде показано (`ScreenOptions` у [src/features/home.ts](src/features/home.ts)). Тому не пиши тексти в стилі toast'а: вони житимуть угорі повноцінного екрана, під яким є кнопки наступного кроку.
+Preserve verbatim: the objective and its branch; unresolved blockers and accepted risks;
+the exact failing command and its last output; verification evidence; decisions recorded
+as ADRs. Discard file listings, passing output, and errors already fixed.
