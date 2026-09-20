@@ -28,12 +28,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # pnpm first: setup-node can only cache pnpm's store once pnpm exists. The pnpm version is
+      # package.json `packageManager`; the Node version is `engines.node` (the field Vercel reads
+      # too, so CI and production cannot drift apart).
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version-file: package.json
+          cache: pnpm
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Render announcement
         id: notes
@@ -42,7 +47,7 @@ jobs:
           # This branch's own commits, the same range the release will see once they
           # land on main, or an explicit range when dispatched.
           RELEASE_RANGE: ${{ inputs.range || format('origin/{0}..HEAD', github.base_ref) }}
-        run: npx tsx scripts/release/notes.ts
+        run: pnpm exec tsx scripts/release/notes.ts
 
       - name: Publish to job summary
         env:

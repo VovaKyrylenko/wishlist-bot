@@ -36,6 +36,9 @@ judgement: a `next` entry in a Python service is absent, not deviated from.
 - **T81** `fingerprint: 78f14df` — Biome 2.x, lint only (formatter and import sorting off), instead of the catalog's Oxlint.
   **Why the rationale did not hold here:** it is the owner's choice (issue #7, 2026-09-20) and **no reason was given, none is invented here**. The catalog's own Why (Oxlint is the direction; a narrow ESLint fallback for Next.js-specific rules) says nothing against Biome, and this project has no Next.js. Owner: state the reason here, or revert to the catalog default.
 
+- **T49** `fingerprint: 2a60618` — Node is pinned by `engines.node` (`>=22.12 <25`) in package.json; `mise.toml` (`node = "24"`) exists for people who use mise but is not the source of truth.
+  **Why the rationale did not hold here:** the entry treats `engines` as advice only and mise as the pin. On Vercel `engines.node` is the ONLY thing that chooses the production Node major (`.nvmrc`, `.node-version` and `mise.toml` are not read), so pinning elsewhere would let production and CI drift apart. CI reads the same field (`setup-node` `node-version-file: package.json`), so one value governs Vercel and CI; the pnpm side of the entry set (T50, `packageManager`) and T70 (pnpm) are followed as written.
+
 ## Inventions
 
 - **Synthetic-update harness behind a staging-only guard** — `scripts/flows/` drives the real bot with fake Telegram updates, intercepts every outgoing API call so nothing reaches a chat, and `assertStaging()` refuses to run unless the database name contains "staging".

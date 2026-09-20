@@ -39,8 +39,15 @@
     "typescript": "^6.0.3",
     "vitest": "^5.0.1"
   },
+  "packageManager": "pnpm@10.34.5",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "esbuild"
+    ]
+  },
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.12 <25"
   },
   "license": "MIT",
   "author": "Volodymyr Kyrylenko",

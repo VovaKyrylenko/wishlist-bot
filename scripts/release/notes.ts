@@ -8,9 +8,9 @@
 // bot, escaping, vocabulary) is decided by code rather than by the model.
 //
 // Local dry run, prints every output instead of writing GITHUB_OUTPUT:
-//   AI_GATEWAY_API_KEY=... npx tsx scripts/release/notes.ts
+//   AI_GATEWAY_API_KEY=... pnpm exec tsx scripts/release/notes.ts
 // Rehearse against an already-released range:
-//   RELEASE_RANGE=v1.0.0..v1.1.0 AI_GATEWAY_API_KEY=... npx tsx scripts/release/notes.ts
+//   RELEASE_RANGE=v1.0.0..v1.1.0 AI_GATEWAY_API_KEY=... pnpm exec tsx scripts/release/notes.ts
 //
 // The model is called over the AI Gateway's OpenAI-compatible REST endpoint with plain
 // fetch: a CI-only script is not worth two new dependencies (`ai`, `zod`) in a bot that

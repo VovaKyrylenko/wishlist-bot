@@ -4,7 +4,7 @@ import { getBot } from "../src/bot.js";
 async function main() {
   const bot = getBot();
   await bot.api.deleteWebhook({ drop_pending_updates: false });
-  console.log("✅ Webhook deleted (switch back to `npm run dev` for local polling).");
+  console.log("✅ Webhook deleted (switch back to `pnpm run dev` for local polling).");
 }
 
 main().catch((err) => {

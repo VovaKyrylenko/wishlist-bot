@@ -34,18 +34,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # pnpm first: setup-node can only cache pnpm's store once pnpm exists. The pnpm version is
+      # package.json `packageManager`; the Node version is `engines.node` (the field Vercel reads
+      # too, so CI and production cannot drift apart).
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version-file: package.json
+          cache: pnpm
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Compute version and release notes
         id: notes
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: npx tsx scripts/release/notes.ts
+        run: pnpm exec tsx scripts/release/notes.ts
 
       - name: Tag and GitHub Release
         if: steps.notes.outputs.skip != 'true'

@@ -1,6 +1,6 @@
 // Exercises the bot end to end against a staging database.
 //
-//   DATABASE_URL=<staging> npm run verify:flows
+//   DATABASE_URL=<staging> pnpm run verify:flows
 //
 // Nothing reaches Telegram: every outgoing API call is intercepted in
 // scripts/flows/harness.ts. The database, however, is real and gets wiped
