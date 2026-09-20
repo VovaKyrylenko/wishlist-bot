@@ -139,7 +139,7 @@ The repository had no automated tests and CI ran none of the checks it did have 
 - [ ] 37. The new table bites on the unfixed file. Against `origin/main`'s `scrape.ts` exactly 14 rows fail, and the mutation class over the IPv6 branch is killed.
       check: `bash scripts/mutation-battery.sh ssrf`
       (Includes `@base` and the nine one-branch mutants. The delta pass ran seven; one survivor, the zone-id split, is dead code.)
-- [ ] 38. The fix's diff to `scrape.ts` is bounded, and it blocks strictly more addresses than before, except four groups the old text pattern `^f[cd]` refused by accident (`[fd::1]`, `[fc::1]`, `[fc0::1]`, `[fdf::1]`: groups outside fc00::/7, public, so no security consequence).
+- [ ] 38. The fix's diff to `scrape.ts` is bounded (one helper plus the IPv6 branch), and it blocks strictly more addresses than before, except spellings whose first 16-bit group is 0x00fc, 0x00fd or 0x0fc0-0x0fdf (34 values, e.g. `[fd::1]`, `[fc0::1]`): the old text pattern `^f[cd]` refused them by accident, they lie outside fc00::/7 and are public, so there is no security consequence.
       manual: `git diff --stat origin/main -- src/lib/scrape.ts` and `git diff origin/main -- src/lib/scrape.ts` reviewed by a human → evidence: PR-B body. Differential fuzz: 11,928 spellings over 312 IPv4 addresses, 0 mismatches (adversary).
 - [ ] 39. `git merge-file` of the fixed `scrape.ts` against the owner's working-tree copy gives no conflict markers.
       manual: run it at implementation time and again just before opening PR-B (the tree is moving) → evidence: PR-B body, with the date.
