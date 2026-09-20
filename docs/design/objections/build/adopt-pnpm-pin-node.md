@@ -54,87 +54,98 @@ protocol deviation, stated plainly: the plan was NOT put through an adversary pa
 
 # Objection log
 
-[OBJ-1] candidate: plan | severity: major | status: proposed
+[OBJ-1] candidate: plan | severity: major | status: verified
 CLAIM:      None of the four workflows has ever run, and `pnpm/action-setup@v6` is a floating tag with open issues about pnpm pins, so the only proof the CI wiring works is reasoning.
 EVIDENCE:   review B: the branch was not pushed, no runs exist; v6 resolves to v6.1.0 (2026-09-05); open issues #268 (ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH with a pnpm 10 pin and no `version` input), #227/#225; the action reads `packageManager` when `version` is omitted (the documented shape).
 SCENARIO:   A patch under the v6 tag breaks the pin; `quality` (required) fails before merge, but kit-release.yml runs only on push to main and would stop releases silently.
 BAR:        A green `quality` run of this exact branch before merge, and the pnpm/Node lines read from its log.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: the branch is pushed and the pull request's own CI is the first run of all changed workflows except kit-release and flows; the pnpm and Node versions are read from the run log and recorded in docs/verification; kit-release.yml and flows.yml cannot run before merge and are accepted-risk in ADR 0005)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md): the bar (green `quality` run with the pnpm/Node lines, and the verification file) is now met: run 35520329602 green, pnpm 10.34.5, Node 24.20.0, docs/verification/build/adopt-pnpm-pin-node.md exists
 
-[OBJ-2] candidate: plan | severity: major | status: proposed
+[OBJ-2] candidate: plan | severity: major | status: accepted-risk
 CLAIM:      Production (Vercel) does not necessarily install with the pinned pnpm: `packageManager` governs CI and local runs, not Vercel.
 EVIDENCE:   review B: Vercel docs say a lockfileVersion 9.0 pnpm-lock.yaml is interpreted by pnpm 9 or 10 and `packageManager` is used only with Corepack; vercel.json has no installCommand; pnpm 9.15.9 run against this `packageManager` field gave no error and a pnpm 10.34.5 clone installed cleanly.
 SCENARIO:   Vercel installs with pnpm 9 or another 10.x; peer/optional resolution or the build step under pnpm's layout differs.
 BAR:        Stated as an accepted risk, or ENABLE_EXPERIMENTAL_COREPACK=1 set, or the pnpm version read from a build log.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: accepted-risk written in ADR 0005 with its bound; the owner can set ENABLE_EXPERIMENTAL_COREPACK=1 in Vercel (an owner setting the assistant cannot change); the first production build log settles it)
+            r2 accepted-risk (fresh reviewer, scratchpad/review-6c.md): bound kept: the first Vercel build log is the check (ADR criterion); the reviewer notes Vercel's source honours packageManager without Corepack, so the ADR wording was made less pessimistic
 
-[OBJ-3] candidate: plan | severity: minor | status: proposed
+[OBJ-3] candidate: plan | severity: minor | status: verified
 CLAIM:      The documented migration command is wrong under pnpm: `pnpm run prisma:migrate -- --name x` forwards the literal `--`.
 EVIDENCE:   review B: with a stub script the command line ended `-- --name x`; in a clone `-- --name zz --bogusflag` was not rejected while the same flags without `--` printed Prisma's usage error.
 SCENARIO:   The name flag is silently ignored and the contributor is prompted.
 BAR:        The line says `pnpm run prisma:migrate --name опис`.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: CONTRIBUTING.md fixed; my generic npm->pnpm replacement had run before the specific one and left the `--`)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-4] candidate: plan | severity: minor | status: proposed
+[OBJ-4] candidate: plan | severity: minor | status: verified
 CLAIM:      Every install prints "Ignored build scripts: prisma@7.9.1".
 EVIDENCE:   review B: clean frozen install prints it; prisma generate, the schema engine, tsx (esbuild), vitest, typecheck, lint, build and tests all work, so the allowlist is correct.
 SCENARIO:   Noise in every CI log; a future reader thinks something is broken.
 BAR:        Silenced or documented.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: `pnpm.ignoredBuiltDependencies: ["prisma"]` was tried and did NOT silence the warning, so it was not kept; the warning is documented in CONTRIBUTING and ADR 0005)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-5] candidate: plan | severity: minor | status: proposed
+[OBJ-5] candidate: plan | severity: minor | status: accepted-risk
 CLAIM:      A contributor without pnpm gets a broken pre-commit hook, and plain `npm install` crashes on a pnpm-managed node_modules.
 EVIDENCE:   review B: .githooks run `pnpm run …` from RUNNER with no command-not-found handling; `npm install --dry-run` on pnpm's node_modules failed with "Cannot read properties of null (reading 'matches')"; Corepack downloads pnpm 10.34.5 on first use; Node 20 gives only a WARN.
 SCENARIO:   Every commit is blocked for someone with only npm.
 BAR:        CONTRIBUTING says pnpm only.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: CONTRIBUTING says pnpm only and names the warning; accepted-risk in ADR 0005)
+            r2 accepted-risk (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-6] candidate: plan | severity: note | status: proposed
+[OBJ-6] candidate: plan | severity: note | status: accepted-risk
 CLAIM:      The open Dependabot pull request #12 will conflict after the merge (the npm lockfile is deleted); PR #3 is already closed.
 EVIDENCE:   `gh pr view 3` CLOSED; #12 on branch dependabot/npm_and_yarn/npm-minor-patch-17915bf4d9; dependabot.yml package-ecosystem npm covers pnpm; reports of Dependabot rewriting pnpm lockfiles' quoting style and of pnpm 11 multi-document lockfiles (not applicable to a pnpm 10 pin).
 SCENARIO:   A stale Dependabot pull request.
 BAR:        Stated.
 HISTORY:    r1 open (design-adversary review B) -> r1 proposed (integrator: accepted-risk in ADR 0005; the owner may close #12 and let Dependabot recreate it)
+            r2 accepted-risk (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-7] candidate: plan | severity: major | status: proposed
+[OBJ-7] candidate: plan | severity: major | status: verified
 CLAIM:      The Vercel criterion cannot say which pnpm actually ran: "detects pnpm 10" is too weak.
 EVIDENCE:   review A: vercel/vercel main, packages/build-utils/src/fs/run-user-scripts.ts (2026-09-20), the log lines differ: "Detected `pnpm-lock.yaml` version 9 generated by pnpm@10.x from package.json#packageManager pnpm@10.34.5" when the pin is honoured, "may be generated by pnpm@9.x, pnpm@10.x, or pnpm@11.x / Using pnpm@N based on project creation date" when ignored; a cold `CI=1 pnpm install --frozen-lockfile` ended "Done in 5m 45.6s using pnpm v10.34.5".
 SCENARIO:   The owner ticks the box on "pnpm@10.x" while pnpm 9 ran, and a later change assumes the pin is enforced.
 BAR:        The criterion names the lines that prove the exact pnpm.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: the criterion in ADR 0005 now lists both variants of the Detected line, the "Done in Xs using pnpm v10.34.5" line and what to record if the pin was ignored)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-8] candidate: plan | severity: major | status: proposed
+[OBJ-8] candidate: plan | severity: major | status: verified
 CLAIM:      The Vercel criterion does not require a green baseline build and does not say what to hit, so a failing preview cannot be attributed to pnpm.
 EVIDENCE:   review A: prisma.config.ts reads only DATABASE_URL_UNPOOLED; src/db.ts throws without DATABASE_URL; vercel-build runs `prisma migrate deploy` on every build; origin/main under npm and this branch under pnpm gave the identical result (generate ok, then P1001 with an unreachable database); api/cron.ts:141-175 with a valid secret sends real reminders.
 SCENARIO:   A preview lacking DATABASE_URL_UNPOOLED fails and pnpm is blamed, or it passes by pointing at production; calling cron with the secret on a preview with production variables sends real messages; `vercel deploy` from the owner's dirty tree uploads an untracked migration.
 BAR:        A baseline, safe smoke checks, and a warning about cron and the dirty tree.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: the criterion now requires a green baseline, the smoke checks GET /api/webhook -> 405 and GET /api/cron without a token -> 401, forbids calling cron with the secret on production variables, and the owner check happens after the merge with the revert as the rollback; deploy from a clean checkout is stated in the pull request)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md): the reviewer's minor is folded in: cron answers 500 when CRON_SECRET is unset on Vercel, not only on tracing failure
 
-[OBJ-9] candidate: plan | severity: minor | status: proposed
+[OBJ-9] candidate: plan | severity: minor | status: verified
 CLAIM:      The "schema engine present" guard cannot fail: it is satisfied with or without the @prisma/engines allowlist.
 EVIDENCE:   review A: in a copy installed with --ignore-scripts the engines directory held only LICENSE, README, dist, package.json and scripts, yet `pnpm exec prisma migrate deploy` downloaded the engine on demand and reached P1001.
 SCENARIO:   "P1001 proves the engine is present" is read as evidence that the allowlist worked; the real exposure is a first-use download at migrate time on Vercel.
 BAR:        Reword the criterion or accept the risk; look for the postinstall line in the log.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: the local criterion is reworded to what it can show (client generated, CLI runs) and says it does not prove the allowlist was needed; the Vercel criterion looks for `@prisma/engines postinstall: Done`)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-10] candidate: plan | severity: minor | status: proposed
+[OBJ-10] candidate: plan | severity: minor | status: verified
 CLAIM:      Dashboard Install/Build Command overrides or a project-level ENABLE_EXPERIMENTAL_COREPACK=1 are not covered.
 EVIDENCE:   review A: docs (2026-08-11) say an override install command such as `pnpm install` uses the oldest pnpm (6); a dashboard `npm ci` would bypass detection; with the variable and a packageManager value Corepack must supply pnpm 10.34.5.
 SCENARIO:   An old override makes the build run npm and fail, or drift.
 BAR:        The owner checks Project Settings.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: added to the Vercel criterion)
+            r2 verified (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-11] candidate: plan | severity: minor | status: proposed
+[OBJ-11] candidate: plan | severity: minor | status: accepted-risk
 CLAIM:      A pnpm older than 10.34.5 in the build image self-switches by fetching the pinned pnpm, a new install-time network dependency.
 EVIDENCE:   review A: pnpm 10.9.0 switched to 10.34.5; with an unreachable registry the switch failed hard with ERR_PNPM_META_FETCH_FAIL.
 SCENARIO:   A registry hiccup during the switch fails the build; Vercel already needs the registry for the install.
 BAR:        Accepted risk.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: accepted-risk, bound: a failed build leaves the previous deployment serving (expected, not observed); noted in ADR 0005)
+            r2 accepted-risk (fresh reviewer, scratchpad/review-6c.md)
 
-[OBJ-12] candidate: plan | severity: note | status: proposed
+[OBJ-12] candidate: plan | severity: note | status: accepted-risk
 CLAIM:      `engines.node ">=22.12 <25"` is accepted by Vercel and gives 24.x; a future Node 26 with 24 dropped fails loudly instead of silently moving.
 EVIDENCE:   review A: node-version.ts getSupportedNodeVersion uses semver validRange + intersects against 24.x, 22.x, 20.x (semver 7.8.5): the range intersects 24.x and 22.x and not 20.x, first match taken.
 SCENARIO:   None today.
 BAR:        Stated.
 HISTORY:    r1 open (design-adversary review A) -> r1 proposed (integrator: stated; no change)
-
+            r2 accepted-risk (fresh reviewer, scratchpad/review-6c.md)
