@@ -1,0 +1,38 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!generated",
+      "!dist",
+      "!coverage",
+      "!.kit",
+      "!.claude/skills",
+      "!.claude/agents",
+      "!.claude/worktrees",
+      "!package-lock.json"
+    ]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "off",
+        "useIterableCallbackReturn": "warn",
+        "noEmptyBlockStatements": "warn",
+        "noVar": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error"
+      }
+    }
+  }
+}

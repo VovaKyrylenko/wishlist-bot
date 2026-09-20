@@ -33,6 +33,9 @@ judgement: a `next` entry in a Python service is absent, not deviated from.
 - **T78** `fingerprint: 3487ee2` — `priceAmount` is a `Float` in `prisma/schema.prisma`.
   **Why the rationale did not hold here:** integers avoid rounding error in arithmetic, and nothing in the code adds, multiplies or charges a price; it is a number read off a shop page and printed back. Revisit when anything sums prices or a payment provider appears.
 
+- **T81** `fingerprint: 78f14df` — Biome 2.x, lint only (formatter and import sorting off), instead of the catalog's Oxlint.
+  **Why the rationale did not hold here:** it is the owner's choice (issue #7, 2026-09-20) and **no reason was given, none is invented here**. The catalog's own Why (Oxlint is the direction; a narrow ESLint fallback for Next.js-specific rules) says nothing against Biome, and this project has no Next.js. Owner: state the reason here, or revert to the catalog default.
+
 ## Inventions
 
 - **Synthetic-update harness behind a staging-only guard** — `scripts/flows/` drives the real bot with fake Telegram updates, intercepts every outgoing API call so nothing reaches a chat, and `assertStaging()` refuses to run unless the database name contains "staging".
