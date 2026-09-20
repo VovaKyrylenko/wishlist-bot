@@ -1,12 +1,15 @@
-name: 🐛 Bug report
-description: Щось не працює так, як має
-labels: ["bug"]
+name: 🐛 Щось не працює
+description: Бот поводиться не так, як має
+labels: ["bug", "triage"]
+# Fields about what a person pressed or saw use the bot's own words (see
+# .claude/rules/voice.md). The environment field is for maintainers and may keep
+# technical terms.
 body:
   - type: textarea
     id: what-happened
     attributes:
       label: Що сталося
-      description: Коротко й по суті опишіть проблему.
+      description: Опиши коротко й по суті.
     validations:
       required: true
 
@@ -23,7 +26,7 @@ body:
     attributes:
       label: Кроки для відтворення
       placeholder: |
-        1. Натиснув «➕ Створити вішліст»
+        1. Натиснув «➕ Створити список»
         2. Ввів назву …
         3. Побачив помилку …
     validations:
@@ -32,10 +35,10 @@ body:
   - type: dropdown
     id: role
     attributes:
-      label: Роль
+      label: Хто ти в цій історії
       options:
-        - Власник вішліста
-        - Гість (перегляд/бронювання)
+        - Власник списку
+        - Гість (відкрив список друга)
     validations:
       required: true
 
@@ -52,6 +55,6 @@ body:
   - type: textarea
     id: extra
     attributes:
-      label: Скріншоти / логи / додатковий контекст
+      label: Скріншоти, логи чи додатковий контекст
     validations:
       required: false
