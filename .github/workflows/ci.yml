@@ -21,30 +21,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm first: setup-node can only cache pnpm's store once pnpm exists. The pnpm version is
+      # package.json `packageManager`; the Node version is `engines.node` (the field Vercel reads
+      # too, so CI and production cannot drift apart).
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version-file: package.json
+          cache: pnpm
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Type-check
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Lint
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
       # Unit tests plus the per-file coverage floors from vitest.config.ts.
-      # `npm test` is also what the pre-push hook runs (TEST_UNIT), so local and CI agree.
+      # `pnpm test` is also what the pre-push hook runs (TEST_UNIT), so local and CI agree.
       #
-      # NOT checked here: `npm run verify:flows` (about 94 end-to-end assertions). It needs a
+      # NOT checked here: `pnpm run verify:flows` (about 94 end-to-end assertions). It needs a
       # staging DATABASE_URL and wipes four tables, and this repository has no such secret;
       # this job has none by design (ADR 0002). Owner/co-author gating, surprise mode and
       # every promise/reservation state change are therefore guarded only by that script:
       # run it locally before merging anything under src/features/, api/ or prisma/, or
       # dispatch .github/workflows/flows.yml once the secret exists.
       - name: Unit tests
-        run: npm test
+        run: pnpm test
