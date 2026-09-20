@@ -1,0 +1,87 @@
+name: Release
+
+# Automatic release on every push to main (= production deploy), the same pipeline as
+# miss_zakarpattia's release.yml. scripts/release/notes.ts computes the next version from
+# conventional commits since the last tag, writes the notes and a Telegram announcement
+# from the actual diff, and this workflow tags, publishes the GitHub Release and posts
+# the announcement. A range with no feat/fix/perf commits (only chore/ci/docs) is not
+# released at all, so the channel is not spammed with technical commits. See ADR 0001.
+#
+# Repository secrets, named as in miss_zakarpattia:
+#   AI_GATEWAY_API_KEY   Vercel AI Gateway key, used to write the notes
+#   TELEGRAM_BOT_TOKEN   a bot that is an admin of the channel (the product bot works)
+#   TELEGRAM_CHAT_ID     the channel: -100… id or @username
+# Without the Telegram secrets the release still happens and the post is skipped; without
+# the gateway key the notes fall back to a plain text.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Compute version and release notes
+        id: notes
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: npx tsx scripts/release/notes.ts
+
+      - name: Tag and GitHub Release
+        if: steps.notes.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.notes.outputs.version }}
+          FRIENDLY_NOTES: ${{ steps.notes.outputs.friendly_notes }}
+          TECHNICAL_NOTES: ${{ steps.notes.outputs.technical_notes }}
+        run: |
+          set -euo pipefail
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+          {
+            printf '%s\n\n---\n\n%s\n' "$FRIENDLY_NOTES" "$TECHNICAL_NOTES"
+          } > release-body.md
+
+          gh release create "$VERSION" --title "$VERSION" --notes-file release-body.md
+
+      # The message is assembled in full by notes.ts, including HTML escaping and the
+      # vocabulary check, so that a local dry run prints exactly what the channel gets.
+      # `announce` is false when the release has nothing a user of the bot can see.
+      - name: Telegram announcement
+        if: steps.notes.outputs.skip != 'true' && steps.notes.outputs.announce == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TEXT: ${{ steps.notes.outputs.telegram_text }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set - announcement skipped."
+            exit 0
+          fi
+          curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TELEGRAM_TEXT}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true"

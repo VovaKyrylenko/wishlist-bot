@@ -1,0 +1,54 @@
+name: kit guards
+
+# Fails a pull request that reaches green by weakening the build rather than fixing it.
+# Deliberate CI changes are allowed with the token [ci-change] in a commit message,
+# which leaves the decision in the history instead of in a conversation.
+
+on:
+  pull_request:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  anti-gaming:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Run the guard as it exists on the BASE branch, not as the pull request leaves it.
+      # CI checks out the branch under test, so a pull request could otherwise replace the
+      # script with `exit 0` in the same commit that would have tripped it.
+      - name: Anti-gaming guard (from the base branch)
+        env:
+          KIT_BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if git cat-file -e "$base:scripts/kit-ci-guards.sh" 2>/dev/null; then
+            git show "$base:scripts/kit-ci-guards.sh" > "$RUNNER_TEMP/kit-ci-guards-base.sh"
+            bash "$RUNNER_TEMP/kit-ci-guards-base.sh"
+          else
+            echo "No guard on the base branch yet — running the one in this branch."
+            bash scripts/kit-ci-guards.sh
+          fi
+
+  profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Profile is consistent
+        run: |
+          if [ ! -f .claude/kit.md ]; then
+            echo "No .claude/kit.md — run 'kit init'." >&2
+            exit 1
+          fi
+          if grep -q NEEDS_CONFIGURATION .claude/kit.md; then
+            echo "Unresolved NEEDS_CONFIGURATION values in .claude/kit.md:" >&2
+            grep -n NEEDS_CONFIGURATION .claude/kit.md >&2
+            exit 1
+          fi
+          echo "profile has no unresolved values"
