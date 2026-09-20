@@ -46,7 +46,7 @@ name, so they cannot drift apart.
 | BUILD | build |
 | TYPECHECK | typecheck |
 | LINT | lint |
-| TEST_UNIT | verify:scrape |
+| TEST_UNIT | none |
 | TEST_E2E | verify:flows |
 | DEV | dev |
 

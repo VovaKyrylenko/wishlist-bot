@@ -1,6 +1,8 @@
-name: ✨ Feature request
+name: ✨ Ідея чи покращення
 description: Ідея нової можливості чи покращення
-labels: ["enhancement"]
+labels: ["enhancement", "triage"]
+# Same register rule as the bug form: the area list uses the bot's own words, except
+# the infrastructure entry, which is for maintainers.
 body:
   - type: textarea
     id: problem
@@ -14,7 +16,7 @@ body:
     id: solution
     attributes:
       label: Пропоноване рішення
-      description: Як, на вашу думку, це має працювати.
+      description: Як, на твою думку, це має працювати.
     validations:
       required: false
 
@@ -23,12 +25,12 @@ body:
     attributes:
       label: Частина бота
       options:
-        - Вішлісти (створення/налаштування)
-        - Товари (додавання/редагування)
-        - Бронювання
-        - Гостьовий перегляд
-        - Підписки/сповіщення
-        - Інфраструктура/деплой
+        - Створення й налаштування списку
+        - Подарунки (додавання, зміна)
+        - Я подарую (обіцянки)
+        - Список друга (погляд гостя)
+        - Стежити й сповіщення
+        - Інфраструктура й деплой
         - Інше
     validations:
       required: false
