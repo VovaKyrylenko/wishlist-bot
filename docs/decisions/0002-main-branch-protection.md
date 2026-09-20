@@ -28,7 +28,8 @@ The payload is `docs/decisions/0002-main-ruleset.json`.
 - **The PR title is the release input.** With squash the title becomes the commit subject on `main`, and `scripts/release/notes.ts` reads its type: `feat`/`fix`/`perf` make a release and a channel post, `chore`/`docs`/`ci` do not. A `feat:` title on a docs change publishes something false.
 - **Breaking changes are marked in the title, `type!:`.** Because the squash message is blank, a `BREAKING CHANGE:` footer in the PR body never reaches `main`, and `notes.ts` would call the release minor. `feat!: change link format` is read; the body is not.
 - **The `quality` job id must not be renamed.** The required check is that job's id. A rename leaves every PR waiting for a check that never reports; `main-protection.sh check` fails when `ci.yml` has no `quality` job, and the change would need the emergency path.
-- `kit-guards` and `announcement-preview` also run on PRs but are deliberately not required: the first needs the base branch's guard to exist, the second needs secrets.
+- `kit-guards` and `announcement-preview` also run on PRs but are deliberately not required: the preview only informs and needs repository secrets that a fork's PR lacks, and `kit-guards` reports process violations rather than merge safety (worth requiring later, once it has proved stable).
+- Rulesets apply to public repositories on the Free plan; if the repository is ever made private without a paid plan the ruleset stops applying, and `verify` will say so.
 
 ## How merges work afterwards
 
@@ -36,7 +37,7 @@ Open the PR, wait for the required check (`gh pr checks --watch`), then `gh pr m
 
 ## Apply
 
-Order matters: merge the PR that carries this record first (a ruleset applied earlier blocks it), then merge settings, then the ruleset.
+Order matters: merge the PR that carries this record first, because the commands read the payload and the script from the repository (a green squash PR would still merge under the ruleset; a direct push would not). That PR is squash-merged with a `chore:` title: nothing in it is release-worthy. Then the merge settings, then the ruleset.
 
 ```bash
 gh api --method PATCH repos/VovaKyrylenko/wishlist-bot \
@@ -53,11 +54,11 @@ gh api --method POST repos/VovaKyrylenko/wishlist-bot/rulesets --input docs/deci
 bash scripts/main-protection.sh verify
 ```
 
-`verify` reads what GitHub reports for `main` and the repository settings, and exits non-zero on any difference. Applying the same payload twice makes a second ruleset or a 422, so re-run only `verify`.
+`verify` reads the rules in effect on `main` (types and every parameter), the ruleset itself (`enforcement` is `active`, no bypass actors) and the repository settings, and exits non-zero on any difference from the design. Applying the same payload twice makes a second ruleset or a 422, so re-run only `verify`.
 
 ## Roll back
 
-Find the ruleset id and delete it; merge settings can be set back the same way.
+Find the ruleset id and delete it, then put the merge settings back to what they were before (recorded 2026-09-20: merge and rebase merging allowed, branches not deleted on merge, commit title `COMMIT_OR_PR_TITLE`, message `COMMIT_MESSAGES`).
 
 ```bash
 gh api repos/VovaKyrylenko/wishlist-bot/rulesets --jq '.[] | select(.name=="main") | .id'
@@ -65,6 +66,12 @@ gh api repos/VovaKyrylenko/wishlist-bot/rulesets --jq '.[] | select(.name=="main
 
 ```bash
 gh api --method DELETE repos/VovaKyrylenko/wishlist-bot/rulesets/<id>
+```
+
+```bash
+gh api --method PATCH repos/VovaKyrylenko/wishlist-bot \
+  -F allow_merge_commit=true -F allow_rebase_merge=true -F delete_branch_on_merge=false \
+  -f squash_merge_commit_title=COMMIT_OR_PR_TITLE -f squash_merge_commit_message=COMMIT_MESSAGES
 ```
 
 ## Alternatives considered
