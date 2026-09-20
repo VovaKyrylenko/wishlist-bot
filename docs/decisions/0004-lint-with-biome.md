@@ -5,13 +5,13 @@ Date: 2026-09-20
 
 ## Context
 
-Issue #7 asked to replace ESLint 10 + typescript-eslint with Biome. The catalog default is Oxlint (T81); choosing Biome is a deviation recorded in `.claude/tastes.md`, and the owner gave no reason for it, so none is claimed here. What shaped the change: the owner has 18 files uncommitted, so a whole-tree reformat would conflict with them and the pre-commit hook would fail their next commit on unformatted files; ESLint on `main` reported nothing while Biome's recommended preset reports 35 warnings; the ESLint config was not type-aware, so there was never a floating-promise check.
+Issue #7 asked to replace ESLint 10 + typescript-eslint with Biome. The catalog default is Oxlint (T81); choosing Biome is a deviation recorded in `.claude/tastes.md`, and the owner gave no reason for it, so none is claimed here. What shaped the change: the owner has 18 files uncommitted, so a whole-tree reformat would conflict with them and the pre-commit hook would fail their next commit on unformatted files; ESLint on `main` reported nothing while Biome's recommended preset reports 36 warnings; the ESLint config was not type-aware, so there was never a floating-promise check.
 
 ## Decision
 
 - `@biomejs/biome` 2.5.14, pinned exactly; `lint` is `biome check`; `eslint`, `@eslint/js`, `typescript-eslint` and `eslint.config.mjs` are removed. `ci.yml` still runs `npm run lint`, so no workflow changes.
 - `biome.json`: formatter and assist (import sorting) **off**, so `biome check` is lint-only and nothing is reformatted; preset `recommended`; ignores carried over (generated, dist, node_modules, .kit, .claude/skills, .claude/agents) plus coverage, package-lock.json and `.claude/worktrees` (a nested `biome.json` under a worktree makes the root run fail).
-- Rule mapping: `noExplicitAny` off (as before); unused variables and arguments warn and ignore `_` names (the preset's default, same as the old `argsIgnorePattern`); `suspicious/useIterableCallbackReturn` downgraded from error to **warn** (two harmless `forEach((x) => lines.push(...))`, one of them in a file the owner is editing); `suspicious/noEmptyBlockStatements` **warn** (partly restores `no-empty`); `nursery/noFloatingPromises` **error** (new, see below).
+- Rule mapping: `noExplicitAny` off (as before); unused variables and arguments warn and ignore `_` names (the preset's default, same as the old `argsIgnorePattern`); `suspicious/useIterableCallbackReturn` downgraded from error to **warn** (two harmless `forEach((x) => lines.push(...))`, one of them in a file the owner is editing); `suspicious/noEmptyBlockStatements` **warn** (partly restores `no-empty`); `suspicious/noVar` **error** (restores `no-var`, zero hits); `nursery/noFloatingPromises` **error** (new, see below).
 - `scripts/dev-polling.ts`: `await bot.start(...)`, the one real hit the new rule found on `main` (a failure of the polling loop bypassed the `main().catch` that logs and exits 1).
 - Turning the formatter on is a separate change, after the owner's work has landed.
 
@@ -20,13 +20,14 @@ Issue #7 asked to replace ESLint 10 + typescript-eslint with Biome. The catalog 
 - **Oxlint (the catalog default).** Not chosen by the owner; no reason recorded.
 - **Keep ESLint.** Rejected by the owner's request.
 - **Biome with the formatter on, one formatting commit.** Rejected: it would conflict with the owner's 18 uncommitted files and fail their next commit on the hook.
-- **Fix the code the new rules complain about.** Rejected for this change: 35 warnings (21 `noNonNullAssertion`, 10 `useOptionalChain`, 2 `useImportType`, 2 `useIterableCallbackReturn`) would touch files the owner is editing; they stay warnings.
+- **Fix the code the new rules complain about.** Rejected for this change: 36 warnings (21 `noNonNullAssertion`, 10 `useOptionalChain`, 2 `useImportType`, 2 `useIterableCallbackReturn`, 1 `noEmptyBlockStatements`) would touch files the owner is editing; they stay warnings.
 
 ## Consequences
 
 - **What is gained:** `noFloatingPromises` catches a dropped `await` on grammY calls (`ctx.reply`, `ctx.answerCallbackQuery`, `ctx.api.*`) and on locally typed promises, and it found one real bug. It is a partial gain, not a guard for the database: **it does not flag a dropped `await` on Prisma calls** (`PrismaPromise` is not recognised; `prisma.processedUpdate.create(...)` without `await` passes), and `tsc` does not catch that either. Those write paths are guarded only by `npm run verify:flows`.
-- **What is lost:** ESLint's `no-namespace`, `no-require-imports` and `no-unused-expressions` (the code is ESM TypeScript without namespaces or `require`); `no-empty` is only partly covered by `noEmptyBlockStatements`.
-- **Noise:** `biome check` prints about 20 diagnostics and "Diagnostics not shown: 16" on every run and every commit: 35 warnings and 1 info on `main` (50 warnings and 2 infos on the owner's uncommitted tree; 0 errors there, so their commits are not blocked). Warnings do not fail the run; `--error-on-warnings` is for after `noNonNullAssertion` is cleaned up.
+- **What is lost** against `eslint:recommended` + typescript-eslint `recommended`, compared by running both on the same code: `no-namespace`, `no-require-imports`, `no-unused-expressions`, `no-useless-assignment`, `preserve-caught-error`, `prefer-as-const`, and `ban-ts-comment` for `@ts-nocheck` and `@ts-expect-error` without a description (Biome covers only `@ts-ignore`). `no-var` is restored with `suspicious/noVar` (error), `no-empty` only partly with `noEmptyBlockStatements` (warn). None of the lost rules has a hit in `src`, `api` or `scripts` today; the code is ESM TypeScript without namespaces or `require`.
+- **Noise:** `biome check` prints about 20 diagnostics and "Diagnostics not shown: 17" on every run and every commit: 36 warnings and 1 info on `main` (50 warnings and 2 infos on the owner's uncommitted tree). Warnings do not fail the run; `--error-on-warnings` is for after `noNonNullAssertion` is cleaned up.
+- **The owner's uncommitted tree:** with this configuration it reports 0 errors, 50 warnings and 2 infos, **but only together with the `await bot.start` fix**: the owner's copy of `scripts/dev-polling.ts` is unmodified and still has the dropped `await`, which `noFloatingPromises` reports as an error, so adopting `biome.json` without that fix would make the pre-commit hook reject their commits. Bringing `main` into their tree brings the fix (the file is not among their modified files).
 - **Upgrades:** `noFloatingPromises` is a nursery rule. Removing or promoting it in a later minor release makes the config invalid and CI red (loudly, not silently). Dependabot's grouped minor/patch update bumps an exact pin too, so **a red Biome bump means migrating the nursery key, never deleting it**; the planted-floating-promise criterion below fails if the entry is deleted.
 - This ADR **amends criterion 21 of ADR 0003** ("Lint passes with tests and `vitest.config.ts` included, with `eslint.config.mjs` and `tsconfig.json` unchanged"): its `check:` names a file that no longer exists. The intent (lint covers the tests and the vitest config, and `tsconfig.json` is unchanged) is kept by the first and last criteria below; ADR 0003 itself is not edited.
 - Revisit when: the formatter is turned on, the owner states the reason for departing from Oxlint (or reverts), or Biome promotes `noFloatingPromises` and gains Prisma promise inference.
@@ -58,8 +59,8 @@ Issue #7 asked to replace ESLint 10 + typescript-eslint with Biome. The catalog 
 - [ ] The deviation from T81 is recorded with the current fingerprint and no invented reason.
       check: grep -q "$(kit tastes list | awk '$1=="T81"{print "fingerprint: "$4}')" .claude/tastes.md
       manual: read the T81 entry in .claude/tastes.md -> evidence: it names the owner's choice and states that no reason was given
-- [ ] The owner's uncommitted tree is not blocked by the hook: the same config reports 0 errors on a read-only copy of it.
-      manual: copy the owner's tree to a temp dir, add biome.json, run `biome lint` -> evidence: "Found 0 errors" (recorded in the verification file)
+- [ ] The owner's uncommitted tree is not blocked by the hook once it has the `scripts/dev-polling.ts` fix: the same config reports 0 errors on a read-only copy of their tree with that file replaced, and exactly 1 error (the dropped await) without the replacement.
+      manual: copy the owner's tree to a temp dir, add biome.json, run `biome check` with and without the fixed dev-polling.ts -> evidence: the two counts (recorded in the verification file)
 - [ ] ADR 0004 exists, lists every downgraded rule and the remaining warning counts, and says it amends criterion 21 of ADR 0003.
       manual: read docs/decisions/0004-*.md -> evidence: the sections exist
 

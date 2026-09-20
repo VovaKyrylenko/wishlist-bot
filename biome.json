@@ -27,7 +27,8 @@
       "suspicious": {
         "noExplicitAny": "off",
         "useIterableCallbackReturn": "warn",
-        "noEmptyBlockStatements": "warn"
+        "noEmptyBlockStatements": "warn",
+        "noVar": "error"
       },
       "nursery": {
         "noFloatingPromises": "error"

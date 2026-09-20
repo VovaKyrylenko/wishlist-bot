@@ -152,3 +152,5 @@ dropped: 22. "PR-A changes no production source" — the fix to src/lib/scrape.t
 ## Supersedes
 
 ## Superseded by
+
+Criterion 21 only is amended by `0004-lint-with-biome.md` (its check names `eslint.config.mjs`, which that decision deletes).
