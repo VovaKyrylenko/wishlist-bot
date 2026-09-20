@@ -14,6 +14,23 @@ const MAX_REDIRECTS = 3;
 /** Plenty for a `<head>`; a product page that needs more is not worth the memory. */
 const MAX_BYTES = 2 * 1024 * 1024;
 
+/** The eight 16-bit groups of an IPv6 literal, or null if it is not one. */
+function ipv6Groups(ip: string): number[] | null {
+  let text = ip.toLowerCase().split("%")[0]; // drop a zone id (fe80::1%eth0)
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number);
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail, ...extra] = text.split("::");
+  if (extra.length > 0) return null;
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const fill = tail === undefined ? 0 : 8 - front.length - back.length;
+  const groups = [...front, ...Array<string>(Math.max(fill, 0)).fill("0"), ...back].map((g) => parseInt(g, 16));
+  return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff) ? groups : null;
+}
+
 /**
  * Anything a user pastes gets fetched by our server, so a link is really a
  * request to make the bot's backend talk to an address of the sender's
@@ -36,13 +53,23 @@ function isBlockedAddress(ip: string): boolean {
   }
 
   if (version === 6) {
-    const normalized = ip.toLowerCase();
-    if (normalized === "::" || normalized === "::1") return true;
-    if (normalized.startsWith("fe80")) return true; // link-local
-    if (/^f[cd]/.test(normalized)) return true; // unique local
-    // IPv4-mapped (::ffff:10.0.0.1) smuggles the ranges above back in.
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
-    if (mapped) return isBlockedAddress(mapped[1]);
+    // Compare numbers, never text: the URL parser rewrites [::ffff:10.0.0.1] to
+    // ::ffff:a00:1, and no string pattern spells every form of one address.
+    const g = ipv6Groups(ip);
+    if (!g) return true; // cannot read it, so do not trust it
+    if (g.slice(0, 6).every((x) => x === 0)) return true; // ::/96, includes :: and ::1
+    if ((g[0] & 0xffc0) === 0xfe80) return true; // link-local, fe80::/10
+    if ((g[0] & 0xfe00) === 0xfc00) return true; // unique local, fc00::/7
+    // Prefixes that carry an IPv4 address in the last 32 bits (or, for 6to4, in
+    // bits 16-47) smuggle the IPv4 ranges above back in.
+    const low = [g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255].join(".");
+    const embedded =
+      (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) || // ::ffff:0:0/96 IPv4-mapped
+      (g.slice(0, 4).every((x) => x === 0) && g[4] === 0xffff && g[5] === 0) || // ::ffff:0:0:0/96 SIIT
+      (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)); // 64:ff9b::/96 NAT64
+    if (embedded) return isBlockedAddress(low);
+    if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return true; // 64:ff9b:1::/48, local-use NAT64
+    if (g[0] === 0x2002) return isBlockedAddress([g[1] >> 8, g[1] & 255, g[2] >> 8, g[2] & 255].join(".")); // 6to4
     return false;
   }
 
