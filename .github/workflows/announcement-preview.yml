@@ -1,0 +1,68 @@
+name: Announcement preview
+
+# Renders the Telegram announcement this PR would produce into the job summary. Nothing
+# is tagged, released or sent; it exists so the wording can be looked at BEFORE merging.
+# The text is generated from the diff at release time, so it cannot be reviewed from the
+# code diff alone.
+
+on:
+  pull_request:
+    branches: [main]
+  # Rehearse against an already-released range, e.g. v1.0.0..v1.1.0.
+  workflow_dispatch:
+    inputs:
+      range:
+        description: "Commit range, e.g. v1.0.0..v1.1.0"
+        required: true
+
+concurrency:
+  group: announcement-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Render announcement
+        id: notes
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          # This branch's own commits, the same range the release will see once they
+          # land on main, or an explicit range when dispatched.
+          RELEASE_RANGE: ${{ inputs.range || format('origin/{0}..HEAD', github.base_ref) }}
+        run: npx tsx scripts/release/notes.ts
+
+      - name: Publish to job summary
+        env:
+          SKIPPED: ${{ steps.notes.outputs.skip }}
+          ANNOUNCE: ${{ steps.notes.outputs.announce }}
+          TELEGRAM_TEXT: ${{ steps.notes.outputs.telegram_text }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Telegram announcement preview'
+            echo
+            if [ "$SKIPPED" = 'true' ]; then
+              echo 'No `feat`/`fix`/`perf` commits - this PR would not release or announce anything.'
+            elif [ "$ANNOUNCE" != 'true' ]; then
+              echo 'A release would be tagged, but nothing in it is visible to users of the bot, so nothing would be posted.'
+            else
+              echo 'Rendered HTML, as Telegram will receive it:'
+              echo
+              echo '```html'
+              echo "$TELEGRAM_TEXT"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

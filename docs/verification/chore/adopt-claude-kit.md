@@ -15,19 +15,21 @@ STEPS:
 EVIDENCE: `doctor: 35 checks, 1 failed, 2 warnings`; three commits accepted by the hook.
 FINDINGS: `claude-md-size` failed at 77 lines before the CLAUDE.md split and passes at 53.
 
-## Run 2 — release announcement (2026-09-20)
+## Run 2 — release announcement, mmz-style pipeline (2026-09-20)
 
 VERDICT: BLOCKED
-CLAIM:   After a release, Claude writes an announcement and it is posted to a Telegram channel.
-METHOD:  Ran `scripts/announce-release.ts` locally; parsed the workflow YAML.
+CLAIM:   After a release, Claude writes an announcement from the diff and it is posted to a Telegram channel, the way miss_zakarpattia does it.
+METHOD:  Ran `scripts/release/notes.ts` on real commits of this repository (`befde27~1..14e46ec`) against a local stand-in for the AI Gateway (`AI_GATEWAY_URL`), in four modes; parsed both workflow files.
 STEPS:
-  1. Run with no secrets set
-     -> "Announcement skipped: ANTHROPIC_API_KEY, ANNOUNCE_BOT_TOKEN, ANNOUNCE_CHAT_ID not set.", exit 0.
-  2. Run with an invalid API key and `DRY_RUN=1`
-     -> a `::warning title=Release announcement failed::Anthropic API 401 …` line, exit 0.
-  3. `check()` on six inputs: `SKIP`, blank, a clean Ukrainian text, text containing "забронювати", text containing "Вішлісти", 1300 characters
-     -> only the clean text was accepted; the other five were rejected with the matching reason.
-  4. Parsed `.github/workflows/kit-release.yml`
-     -> steps: checkout, version, Release, setup-node, Announce.
-EVIDENCE: outputs above. The failure paths and the validator are observed working.
-FINDINGS: Not observed, because the secrets and the channel do not exist yet: a real Claude answer, a real Telegram post, and a run of the workflow on GitHub Actions. The first release is deliberately not announced, so the first real announcement will be the second release after merge.
+  1. Stand-in returns a valid JSON answer wrapped in a markdown fence
+     -> `announce=true`; the message has the header, the block, the numbered steps and the release link; the request carried `Authorization: Bearer <key>` and model `anthropic/claude-sonnet-5` on `/v1/chat/completions`.
+  2. Stand-in returns a highlight using "забронювати" / "Бронювання"
+     -> the highlight was dropped; the post became the neutral "Бот оновився" text.
+  3. Stand-in returns text that is not JSON
+     -> the same neutral text, exit 0.
+  4. Stand-in returns `{"items":[]}`
+     -> `announce=false`, so no post.
+  5. `tsc --noEmit` and `eslint .` (also run by the pre-commit hook); YAML of `kit-release.yml` and `announcement-preview.yml` parsed.
+     -> clean.
+EVIDENCE: outputs above. Parsing, vocabulary vetting, message assembly and the skip decision are observed working.
+FINDINGS: Not observed, because the secrets and the channel do not exist yet: a real AI Gateway answer, a real Telegram post, and a run of either workflow on GitHub Actions. The gateway endpoint and auth header were checked against Vercel's documentation, not exercised. The baseline tag `v1.0.0` must exist on `origin` before the first push to `main`, or the first release will treat the whole history as new.

@@ -1,21 +1,26 @@
-name: kit release
+name: Release
 
-# Every merge to the default branch becomes a release: version computed from
-# conventional commits, tag pushed, notes generated. Squash-merge makes the PR title the
-# commit and the commit the release line — which is why PR titles must be conventional.
+# Automatic release on every push to main (= production deploy), the same pipeline as
+# miss_zakarpattia's release.yml. scripts/release/notes.ts computes the next version from
+# conventional commits since the last tag, writes the notes and a Telegram announcement
+# from the actual diff, and this workflow tags, publishes the GitHub Release and posts
+# the announcement. A range with no feat/fix/perf commits (only chore/ci/docs) is not
+# released at all, so the channel is not spammed with technical commits. See ADR 0001.
 #
-# This project's extension (ADR 0001): after a release, Claude writes a short announcement
-# from the release notes and scripts/announce-release.ts posts it to a Telegram channel.
-# It needs three repository secrets and does nothing, successfully, until they exist:
-#   ANTHROPIC_API_KEY    writes the text
-#   ANNOUNCE_BOT_TOKEN   a bot that is an admin of the channel (the product bot works)
-#   ANNOUNCE_CHAT_ID     the channel: -100… id or @username
-# Optional: ANNOUNCE_MODEL. Set repository variable ANNOUNCE_DRY_RUN=1 to log the text
-# instead of posting it.
+# Repository secrets, named as in miss_zakarpattia:
+#   AI_GATEWAY_API_KEY   Vercel AI Gateway key, used to write the notes
+#   TELEGRAM_BOT_TOKEN   a bot that is an admin of the channel (the product bot works)
+#   TELEGRAM_CHAT_ID     the channel: -100… id or @username
+# Without the Telegram secrets the release still happens and the post is skipped; without
+# the gateway key the notes fall back to a plain text.
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -23,66 +28,60 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Compute the next version from conventional commits
-        id: version
-        run: |
-          last="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)"
-          range="$last..HEAD"
-          first=false
-          [ "$last" = "v0.0.0" ] && { range="HEAD"; first=true; }
-          echo "first=$first" >> "$GITHUB_OUTPUT"
-          count="$(git rev-list --count $range)"
-          if [ "$count" -eq 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          subjects="$(git log --format=%s $range)"
-          bodies="$(git log --format=%B $range)"
-          major=0; minor=0
-          printf '%s\n' "$subjects" | grep -Eq '^[a-z]+(\([^)]*\))?!:' && major=1
-          printf '%s\n' "$bodies"   | grep -q  'BREAKING CHANGE' && major=1
-          printf '%s\n' "$subjects" | grep -Eq '^feat(\([^)]*\))?:' && minor=1
-          v="${last#v}"; IFS=. read -r a b c <<EOF
-          $v
-          EOF
-          if   [ "$major" -eq 1 ]; then a=$((a+1)); b=0; c=0
-          elif [ "$minor" -eq 1 ]; then b=$((b+1)); c=0
-          else c=$((c+1)); fi
-          echo "tag=v$a.$b.$c" >> "$GITHUB_OUTPUT"
-          echo "skip=false"    >> "$GITHUB_OUTPUT"
-
-      - name: Release
-        if: steps.version.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="${{ steps.version.outputs.tag }}"
-          git tag "$tag"
-          git push origin "$tag"
-          gh release create "$tag" --generate-notes --title "$tag"
-
       - uses: actions/setup-node@v4
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.first != 'true'
         with:
-          node-version: 24
+          node-version: 22
+          cache: npm
 
-      # The first release has the whole history as its notes; announcing that would be
-      # noise, so the channel only hears about releases that follow a previous tag.
-      - name: Announce
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.first != 'true'
+      - run: npm ci
+
+      - name: Compute version and release notes
+        id: notes
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: npx tsx scripts/release/notes.ts
+
+      - name: Tag and GitHub Release
+        if: steps.notes.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANNOUNCE_BOT_TOKEN: ${{ secrets.ANNOUNCE_BOT_TOKEN }}
-          ANNOUNCE_CHAT_ID: ${{ secrets.ANNOUNCE_CHAT_ID }}
-          ANNOUNCE_MODEL: ${{ vars.ANNOUNCE_MODEL }}
-          DRY_RUN: ${{ vars.ANNOUNCE_DRY_RUN }}
+          VERSION: ${{ steps.notes.outputs.version }}
+          FRIENDLY_NOTES: ${{ steps.notes.outputs.friendly_notes }}
+          TECHNICAL_NOTES: ${{ steps.notes.outputs.technical_notes }}
         run: |
-          tag="${{ steps.version.outputs.tag }}"
-          export TAG="$tag"
-          export NOTES="$(gh release view "$tag" --json body --jq .body)"
-          node scripts/announce-release.ts
+          set -euo pipefail
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+          {
+            printf '%s\n\n---\n\n%s\n' "$FRIENDLY_NOTES" "$TECHNICAL_NOTES"
+          } > release-body.md
+
+          gh release create "$VERSION" --title "$VERSION" --notes-file release-body.md
+
+      # The message is assembled in full by notes.ts, including HTML escaping and the
+      # vocabulary check, so that a local dry run prints exactly what the channel gets.
+      # `announce` is false when the release has nothing a user of the bot can see.
+      - name: Telegram announcement
+        if: steps.notes.outputs.skip != 'true' && steps.notes.outputs.announce == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TEXT: ${{ steps.notes.outputs.telegram_text }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set - announcement skipped."
+            exit 0
+          fi
+          curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TELEGRAM_TEXT}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true"
