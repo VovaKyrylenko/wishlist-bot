@@ -8,7 +8,7 @@ async function main() {
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   await syncBotCommands(bot);
 
-  bot.start({
+  await bot.start({
     onStart: (info) => console.log(`✅ @${info.username} is running (long polling)`),
   });
 }
