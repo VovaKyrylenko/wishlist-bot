@@ -28,7 +28,7 @@ if (missing.length > 0) {
 
 // Deliberately NOT covered here (boundary, see the PR and docs/FLOWS.md): api/webhook.ts,
 // src/features/*, requireList and every `{ owner: true }` call site import src/db.ts,
-// which throws without DATABASE_URL. Those are guarded only by `npm run verify:flows`.
+// which throws without DATABASE_URL. Those are guarded only by `pnpm run verify:flows`.
 // src/lib/scrape.ts has behaviour tests but no number: its size changes with the price rewrite.
 export default defineConfig({
   test: {

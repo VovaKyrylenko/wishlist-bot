@@ -12,7 +12,7 @@ one does, because duplicated policy is how a kit rots.
 |---|---|
 | PROJECT_NAME | wishlist-bot |
 | MAIN_BRANCH | main |
-| RUNNER | npm run |
+| RUNNER | pnpm run |
 | STACK | node |
 | SOURCE_DIR | src |
 | TEST_DIR | src |
@@ -42,7 +42,7 @@ name, so they cannot drift apart.
 
 | Key | Script |
 |---|---|
-| INSTALL | raw:npm ci |
+| INSTALL | raw:pnpm install --frozen-lockfile |
 | BUILD | build |
 | TYPECHECK | typecheck |
 | LINT | lint |

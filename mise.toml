@@ -1,0 +1,7 @@
+# Local development tool versions for people who use mise. Vercel does NOT read this file:
+# production takes its Node major from `engines.node` in package.json, and CI reads the same
+# field (setup-node `node-version-file: package.json`), so `engines.node` is the single source
+# of truth and this file only has to stay inside it (checked in ADR 0005's criteria).
+# pnpm is not listed on purpose: package.json `packageManager` pins it and pnpm switches itself.
+[tools]
+node = "24"

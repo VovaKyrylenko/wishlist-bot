@@ -4,11 +4,11 @@
 
 ## Як перевірено
 
-- [ ] `npm run typecheck`
-- [ ] `npm run lint`
-- [ ] `npm test`
-- [ ] `npm run verify:flows` — якщо змінено `src/features/`, `api/` або `prisma/` (у CI його немає)
-- [ ] Перевірено вручну через `npm run dev` (long polling)
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm run lint`
+- [ ] `pnpm test`
+- [ ] `pnpm run verify:flows` — якщо змінено `src/features/`, `api/` або `prisma/` (у CI його немає)
+- [ ] Перевірено вручну через `pnpm run dev` (long polling)
 
 ## Міграції бази даних
 

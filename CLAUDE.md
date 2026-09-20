@@ -42,7 +42,7 @@ obvious yourself; a strategic question arrives at hand-off as a proposal with tr
 
 `/work-issue` implements a task end to end · `/investigate-codebase` before touching
 unfamiliar code · `/research` before adopting a dependency · `/verify-change` proves it
-runs (`npm run verify:flows` drives the bot with synthetic updates against a staging
+runs (`pnpm run verify:flows` drives the bot with synthetic updates against a staging
 database) · `/review-diff` before merge · `/write-adr` for decisions · `/kit-doctor` when
 the setup misbehaves.
 
