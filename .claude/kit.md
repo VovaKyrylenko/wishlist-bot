@@ -15,7 +15,7 @@ one does, because duplicated policy is how a kit rots.
 | RUNNER | npm run |
 | STACK | node |
 | SOURCE_DIR | src |
-| TEST_DIR | scripts |
+| TEST_DIR | src |
 | CI | github-actions |
 | DESIGN_DOCS | docs/design |
 | CONSTRAINTS | .claude/constraints.md |
@@ -46,7 +46,7 @@ name, so they cannot drift apart.
 | BUILD | build |
 | TYPECHECK | typecheck |
 | LINT | lint |
-| TEST_UNIT | none |
+| TEST_UNIT | test |
 | TEST_E2E | verify:flows |
 | DEV | dev |
 

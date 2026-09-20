@@ -1,7 +1,7 @@
 name: CI
 
 # Обов'язкова перевірка для branch protection на main: типи + лінт + компіляція
-# на кожен PR і push у main. Prisma-схема не потребує реального DATABASE_URL
+# + unit-тести на кожен PR і push у main. Prisma-схема не потребує реального DATABASE_URL
 # для `generate` (лише для migrate/runtime), тому CI не має жодних секретів.
 
 on:
@@ -36,3 +36,15 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # Unit tests plus the per-file coverage floors from vitest.config.ts.
+      # `npm test` is also what the pre-push hook runs (TEST_UNIT), so local and CI agree.
+      #
+      # NOT checked here: `npm run verify:flows` (about 94 end-to-end assertions). It needs a
+      # staging DATABASE_URL and wipes four tables, and this repository has no such secret;
+      # this job has none by design (ADR 0002). Owner/co-author gating, surprise mode and
+      # every promise/reservation state change are therefore guarded only by that script:
+      # run it locally before merging anything under src/features/, api/ or prisma/, or
+      # dispatch .github/workflows/flows.yml once the secret exists.
+      - name: Unit tests
+        run: npm test
