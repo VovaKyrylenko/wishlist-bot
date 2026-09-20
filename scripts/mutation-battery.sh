@@ -3,7 +3,7 @@
 #
 # Coverage says which lines ran, not whether anything is asserted about them; a test
 # with no assertions meets a coverage floor. So each class below breaks one rule the
-# product depends on and demands that `npm test` goes red. Every survivor means a test
+# product depends on and demands that `pnpm test` goes red. Every survivor means a test
 # is missing: add the test, never delete the mutant.
 #
 #   bash scripts/mutation-battery.sh <class>     classes: availability deeplink access
@@ -19,7 +19,9 @@ class="${1:-}"
 
 # One mutant per line: <file><TAB><sed -E expression>. Write a literal ampersand as [&] in a
 # pattern (\& means something different to GNU and BSD sed) and as \& in a replacement.
-# The expression `@base` swaps in the file as it is on origin/main, i.e. the unfixed code.
+# The expression `@rev:<commit>` swaps in the file as it was at that commit. The ssrf class uses
+# c7bc192, the parent of the change that fixed the guard: origin/main cannot serve as the baseline
+# any more, it contains the fix.
 mutants() {
   case "$1" in
     availability)
@@ -65,7 +67,7 @@ mutants() {
       ;;
     ssrf)
       printf '%s\t%s\n' \
-        src/lib/scrape.ts '@base' \
+        src/lib/scrape.ts '@rev:c7bc192' \
         src/lib/scrape.ts 's#if \(g\.slice\(0, 6\)\.every\(\(x\) => x === 0\)\) return true;#// mutated#' \
         src/lib/scrape.ts 's#g\[5\] === 0xffff\) \|\|#false) ||#' \
         src/lib/scrape.ts 's#g\[4\] === 0xffff [&][&] g\[5\] === 0#false#' \
@@ -103,8 +105,8 @@ while IFS=$'\t' read -r file expr; do
   ln -s "$PWD/node_modules" "$work/tree/node_modules"
   [ -d generated ] && ln -s "$PWD/generated" "$work/tree/generated"
 
-  if [ "$expr" = "@base" ]; then
-    git show "origin/main:$file" > "$work/mutant"
+  if [ "${expr#@rev:}" != "$expr" ]; then
+    git show "${expr#@rev:}:$file" > "$work/mutant"
   else
     sed -E "$expr" "$work/tree/$file" > "$work/mutant"
   fi
@@ -115,7 +117,7 @@ while IFS=$'\t' read -r file expr; do
   fi
   cp "$work/mutant" "$work/tree/$file"
 
-  if (cd "$work/tree" && env -u DATABASE_URL -u BOT_TOKEN npx vitest run --coverage.enabled=false >/dev/null 2>&1); then
+  if (cd "$work/tree" && env -u DATABASE_URL -u BOT_TOKEN pnpm exec vitest run --coverage.enabled=false >/dev/null 2>&1); then
     echo "SURVIVED: $file  $expr" >&2
     failed=1
   else
