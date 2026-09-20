@@ -27,7 +27,7 @@ The payload is `docs/decisions/0002-main-ruleset.json`.
 
 - **The PR title is the release input.** With squash the title becomes the commit subject on `main`, and `scripts/release/notes.ts` reads its type: `feat`/`fix`/`perf` make a release and a channel post, `chore`/`docs`/`ci` do not. A `feat:` title on a docs change publishes something false.
 - **Breaking changes are marked in the title, `type!:`.** Because the squash message is blank, a `BREAKING CHANGE:` footer in the PR body never reaches `main`, and `notes.ts` would call the release minor. `feat!: change link format` is read; the body is not.
-- **The `quality` job id must not be renamed.** The required check is that job's id. A rename leaves every PR waiting for a check that never reports; `main-protection.sh check` fails when `ci.yml` has no `quality` job, and the change would need the emergency path.
+- **The `quality` job must keep reporting a check called `quality` on every PR.** A rename, a `name:`, a `strategy:` matrix, or a `paths:` filter on the triggers each leave PRs waiting for a check that never reports; `main-protection.sh check` rejects all four, and a deliberate change would need the emergency path.
 - `kit-guards` and `announcement-preview` also run on PRs but are deliberately not required: the preview only informs and needs repository secrets that a fork's PR lacks, and `kit-guards` reports process violations rather than merge safety (worth requiring later, once it has proved stable).
 - Rulesets apply to public repositories on the Free plan; if the repository is ever made private without a paid plan the ruleset stops applying, and `verify` will say so.
 
@@ -54,7 +54,7 @@ gh api --method POST repos/VovaKyrylenko/wishlist-bot/rulesets --input docs/deci
 bash scripts/main-protection.sh verify
 ```
 
-`verify` reads the rules in effect on `main` (types and every parameter), the ruleset itself (`enforcement` is `active`, no bypass actors) and the repository settings, and exits non-zero on any difference from the design. Applying the same payload twice makes a second ruleset or a 422, so re-run only `verify`.
+Run `verify` as the repository owner or an admin: GitHub returns a ruleset's bypass actors only to a caller with write access to it, and `verify` says so when they are missing. It reads the rules in effect on `main` (types and every parameter), the ruleset itself (`enforcement` is `active`, no bypass actors) and the repository settings, and exits non-zero on any difference from the design. Applying the same payload twice makes a second ruleset or a 422, so re-run only `verify`.
 
 ## Roll back
 

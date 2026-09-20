@@ -53,13 +53,21 @@ cmd_check() {
   ' "$payload" >/dev/null || { echo "ruleset payload does not match the design" >&2; exit 1; }
 
   # The context is a job id, not a label: renaming the job would leave main waiting on a
-  # check that never reports.
-  grep -q '^  quality:$' "$workflow" \
+  # check that never reports. Three more edits do the same without renaming it, and a
+  # required check that never reports blocks every PR, so all are rejected here:
+  #   - a `name:` on the job (GitHub reports the check under the name, not the id);
+  #   - a `strategy:` on the job (a matrix reports `quality (20)`, never `quality`);
+  #   - a `paths:` filter on the workflow's triggers (a docs-only PR would never get one).
+  grep -Eq '^  quality:[[:space:]]*(#.*)?$' "$workflow" \
     || { echo "$workflow has no job with id 'quality'" >&2; exit 1; }
-  # GitHub reports a check under the job's `name:` when it has one, and the required
-  # context is matched against that, not against the id.
-  if awk '/^  quality:$/ {inq=1; next} inq && /^  [A-Za-z0-9_-]+:$/ {inq=0} inq && /^    name:/ {found=1} END {exit found ? 0 : 1}' "$workflow"; then
-    echo "the quality job in $workflow has a name:, so its check would not be reported as 'quality'" >&2
+  local block
+  block="$(awk '/^  quality:[[:space:]]*(#.*)?$/ {inq=1; next} inq && /^  [A-Za-z0-9_-]+:/ {inq=0} inq {print}' "$workflow")"
+  if printf '%s\n' "$block" | grep -Eq '^    (name|strategy):'; then
+    echo "the quality job in $workflow has a name: or strategy:, so its check would not be reported as 'quality'" >&2
+    exit 1
+  fi
+  if grep -Eq '^[[:space:]]+paths(-ignore)?:' "$workflow"; then
+    echo "$workflow filters its triggers by paths:, so the required check would be missing on some PRs" >&2
     exit 1
   fi
   echo "ok: ruleset payload matches the design and 'quality' is a real job id"
@@ -82,7 +90,13 @@ cmd_verify() {
   printf '%s' "$rules" | jq -e '[.[].ruleset_id] | unique | length == 1' >/dev/null \
     || { echo "more than one ruleset applies to main" >&2; exit 1; }
   id="$(printf '%s' "$rules" | jq -r '.[0].ruleset_id')"
-  gh api "repos/$repo/rulesets/$id" | jq -e '.enforcement == "active" and .bypass_actors == []' >/dev/null \
+  local detail
+  detail="$(gh api "repos/$repo/rulesets/$id")"
+  # GitHub returns bypass_actors only to a caller with write access to the ruleset, so
+  # its absence means "run this as the owner", not "there are none".
+  printf '%s' "$detail" | jq -e 'has("bypass_actors")' >/dev/null \
+    || { echo "cannot read bypass_actors of ruleset $id: run verify as the repository owner or an admin" >&2; exit 1; }
+  printf '%s' "$detail" | jq -e '.enforcement == "active" and .bypass_actors == []' >/dev/null \
     || { echo "ruleset $id is not active or has bypass actors" >&2; exit 1; }
 
   gh api "repos/$repo" | jq -e '
