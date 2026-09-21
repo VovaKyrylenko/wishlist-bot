@@ -19,7 +19,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "vercel-build": "prisma generate && prisma migrate deploy",
-    "verify:flows": "tsx scripts/flows/run.ts"
+    "verify:flows": "tsx scripts/flows/run.ts",
+    "verify:scrape": "tsx scripts/scrape/run.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

@@ -539,6 +539,10 @@ export const t = {
       "Наприклад: 2. Якщо одна — так і напиши 1 🙂",
     ].join("\n"),
     askPriority: "Наскільки сильно хочеш цей подарунок?",
+    urlInvalid:
+      "Це не схоже на посилання 😕 Надішли адресу сторінки з магазину — наприклад, rozetka.com.ua/… — або тисни «Пропустити».",
+    addToFinished:
+      "Список завершено — нові подарунки він не приймає. Понови його або створи копію через «Використати знову».",
     photoPlease: "Це має бути фото 🙂 Надішли картинку або тисни «Пропустити».",
     photoRemoved: "✅ Фото прибрано.",
     quantityBelowPromised: (promised: number) =>
@@ -651,9 +655,14 @@ export const t = {
       "",
       "Ось що ще вільне:",
     ].join("\n"),
-    promiseOwnList: "Це ж твій власний список 🙂 Обіцяти собі подарунки не треба.",
+    promiseOwnList: "Це ж твій список 🙂 Обіцянки тут — для друзів.",
     promiseListFinished: "Список уже завершено — нових обіцянок він не приймає.",
     promiseUndone: (title: string) => `↩️ Відпустив «${title}» — подарунок знову вільний.`,
+    promiseUndoneOne: (title: string, remaining: number) =>
+      `↩️ Прибрав одну штуку «${title}» — за тобою лишається ${remaining} шт.`,
+    promiseUndoBought: (title: string) =>
+      `Ти вже позначив «${title}» купленим. Змінити статус можна в «🎗 Я дарую» на Головній.`,
+    promiseUndoGone: "Цю обіцянку вже скасовано — нічого не змінюю.",
   },
 
   promise: {
@@ -717,6 +726,10 @@ export const t = {
       `🎁 Подарунок із «${list}» уже куплено!\n\n🟣 ${gift}\n🟣 Купив(ла): ${guest}`,
     ownerCoAuthorJoined: (list: string, name: string) =>
       `👥 ${name} приєднався(лась) до списку «${list}» — тепер ви ведете його разом 💜`,
+    ownerUnboughtSurprise: (list: string) =>
+      `↩️ У «${list}» один подарунок знову «обіцяно, але ще не куплено».`,
+    ownerUnboughtOpen: (list: string, gift: string, guest: string) =>
+      `↩️ ${guest} ще не купив «${gift}» зі списку «${list}» — позначку «куплено» знято.`,
 
     // ── Гостю: усе, що ламає його обіцянку ───────────────────────────────
     guestGiftRemoved: (list: string, gift: string) =>
@@ -741,14 +754,20 @@ export const t = {
     // ── Нагадування про подію ────────────────────────────────────────────
     eventReminderGuest: (list: string, days: number, link: string) =>
       [
-        days === 1 ? `📅 «${list}» — вже завтра!` : `📅 «${list}» — вже через ${t.plural.days(days)}`,
+        days <= 0
+          ? `📅 «${list}» — вже сьогодні!`
+          : days === 1
+            ? `📅 «${list}» — вже завтра!`
+            : `📅 «${list}» — вже через ${t.plural.days(days)}`,
         "",
         "Якщо ще не обрав подарунок — саме час:",
         link,
       ].join("\n"),
     eventReminderOwner: (list: string, days: number) =>
-      days === 1
-        ? `📅 «${list}» вже завтра — саме час нагадати друзям про список 💜`
-        : `📅 «${list}» вже через ${t.plural.days(days)} — саме час нагадати друзям про список 💜`,
+      days <= 0
+        ? `📅 «${list}» вже сьогодні — гарного свята 💜`
+        : days === 1
+          ? `📅 «${list}» вже завтра — саме час нагадати друзям про список 💜`
+          : `📅 «${list}» вже через ${t.plural.days(days)} — саме час нагадати друзям про список 💜`,
   },
 };

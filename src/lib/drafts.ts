@@ -38,7 +38,17 @@ export function hasContent(draft: Draft): boolean {
 export type DraftFields = Partial<
   Pick<
     Draft,
-    "wishlistId" | "title" | "url" | "imageUrl" | "price" | "store" | "comment" | "quantity" | "priority"
+    | "wishlistId"
+    | "title"
+    | "url"
+    | "imageUrl"
+    | "price"
+    | "priceAmount"
+    | "priceCurrency"
+    | "store"
+    | "comment"
+    | "quantity"
+    | "priority"
   >
 >;
 
@@ -57,6 +67,8 @@ export async function startDraft(userId: string, fields: DraftFields): Promise<D
       url: null,
       imageUrl: null,
       price: null,
+      priceAmount: null,
+      priceCurrency: null,
       store: null,
       comment: null,
       quantity: 1,

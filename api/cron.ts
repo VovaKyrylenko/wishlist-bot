@@ -116,19 +116,22 @@ async function sendNewItemDigests(api: Awaited<ReturnType<typeof getBot>>["api"]
     if (added === 0) continue;
 
     const keyboard = new InlineKeyboard().text(t.buttons.view, `g:open:${sub.wishlistId}:a:0`);
-    const delivered = await safeSend(
+    const result = await safeSend(
       api,
       sub.user.telegramId,
       t.notify.newGiftsDigest(escapeHtml(sub.wishlist.title), added),
       keyboard,
     );
-    if (delivered) sent++;
+    if (result === "delivered") sent++;
 
-    // Advanced either way: a blocked user's subscription is deleted by
-    // safeSend, and a transient failure should not replay the whole backlog.
-    await prisma.subscription
-      .update({ where: { id: sub.id }, data: { lastNotifiedAt: now } })
-      .catch(() => undefined);
+    // A transient failure (timeout, 429) keeps the watermark, so the next run
+    // retries this digest instead of losing it forever. "unreachable" advances
+    // it like a delivery — safeSend has already dropped that follower.
+    if (result !== "failed") {
+      await prisma.subscription
+        .update({ where: { id: sub.id }, data: { lastNotifiedAt: now } })
+        .catch(() => undefined);
+    }
   }
 
   return sent;

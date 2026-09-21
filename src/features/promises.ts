@@ -11,8 +11,9 @@ import type { MyContext } from "../context.js";
 import { prisma } from "../db.js";
 import { currentUser } from "../lib/users.js";
 import { computeAvailability, holdingReservations, HOLDING_STATUSES } from "../lib/availability.js";
-import { escapeHtml, formatDate, formatGuestName } from "../lib/format.js";
+import { escapeHtml, formatDate, formatGuestName, isHttpUrl } from "../lib/format.js";
 import {
+  notifyOwnerBoughtUndone,
   notifyOwnerGiftBought,
   notifyOwnerPromiseReleased,
   notifyWatchersGiftFreeAgain,
@@ -130,7 +131,7 @@ async function renderPromise(ctx: MyContext, reservationId: string, options: Scr
   const giftGone = item.status !== "ACTIVE";
 
   const kb = new InlineKeyboard();
-  if (item.url) kb.url(t.buttons.whereToBuy, item.url).row();
+  if (item.url && isHttpUrl(item.url)) kb.url(t.buttons.whereToBuy, item.url).row();
   if (!giftGone) {
     kb.text(bought ? t.buttons.undoBought : t.buttons.markBought, `res:${bought ? "unbought" : "bought"}:${promise.id}`).row();
     kb.text(t.buttons.release, `res:free:${promise.id}`).row();
@@ -248,6 +249,19 @@ export function registerPromises(bot: Bot<MyContext>) {
     if (!promise) return;
     if (promise.status === "PURCHASED") {
       await prisma.reservation.update({ where: { id: promise.id }, data: { status: "ACTIVE" } });
+
+      // The confirmation warned that the owner had already been told «куплено»
+      // — so the owner is told it is undone, or their picture stays wrong.
+      if (promise.item.wishlist.notifyOwner && promise.item.status === "ACTIVE") {
+        const user = await currentUser(ctx);
+        await notifyOwnerBoughtUndone(ctx.api, {
+          ownerTelegramId: promise.item.wishlist.owner.telegramId,
+          wishlistTitle: promise.item.wishlist.title,
+          giftTitle: promise.item.title,
+          privacyMode: promise.item.wishlist.privacyMode,
+          guestName: formatGuestName(user),
+        });
+      }
     }
     await renderPromise(ctx, promise.id, {
       notice: t.promise.unbought(escapeHtml(truncate(promise.item.title, 60))),

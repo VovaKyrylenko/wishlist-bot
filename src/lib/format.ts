@@ -9,6 +9,37 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * True for a URL Telegram will accept in an inline button. A gift's `url` has
+ * to pass this before it is stored: one invalid `kb.url(...)` makes Telegram
+ * reject the whole keyboard and the screen silently fails to render — the one
+ * thing this bot promises never to do.
+ */
+export function isHttpUrl(text: string): boolean {
+  try {
+    const url = new URL(text);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Accepts what a person actually pastes: a full address, or a bare
+ * "rozetka.com.ua/..." that only needs its protocol back. Returns null when
+ * the text is not a link at all, so the caller can re-ask instead of storing
+ * something that would break the gift's screen.
+ */
+export function normalizeUrl(text: string): string | null {
+  const candidate = text.trim();
+  if (!candidate || /\s/.test(candidate)) return null;
+  if (isHttpUrl(candidate)) return candidate;
+  if (!candidate.startsWith("http") && isHttpUrl(`https://${candidate}`)) {
+    return `https://${candidate}`;
+  }
+  return null;
+}
+
 export const PRIORITY_ICON = t.labels.priorityIcon;
 export const PRIORITY_NAME = t.labels.priorityName;
 
