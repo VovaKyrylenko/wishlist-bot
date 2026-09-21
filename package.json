@@ -27,6 +27,7 @@
     "@prisma/adapter-neon": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "cheerio": "^1.2.0",
+    "domhandler": "^5.0.3",
     "dotenv": "^17.4.2",
     "grammy": "^1.45.1"
   },
