@@ -161,6 +161,33 @@ export async function run() {
   check("жодного натяку, хто обрав", !text().includes("Олег"));
   check("жодного лічильника обіцянок", !text().includes("Обрали"));
 
+  // ── S4 Редагування збереженого подарунка ─────────────────────────────────
+  // Regression: the answer to "✏️ Змінити → Назва" used to be claimed by the
+  // list handler, which read the gift id as a list id, showed Головна and
+  // dropped the edit. Every text field shares that path, so each one is sent.
+  // The price is reformatted on save, so its check is on the number alone.
+  const edits: [field: string, answer: string, expected: string, stored: (g: typeof gift) => unknown][] = [
+    ["title", "Навушники Sony XM6 чорні", "Навушники Sony XM6 чорні", (g) => g?.title],
+    ["price", "15000 грн", "15", (g) => g?.price],
+    ["store", "Rozetka", "Rozetka", (g) => g?.store],
+    ["comment", "Чорний колір", "Чорний колір", (g) => g?.comment],
+    ["url", "https://example.com/sony", "example.com/sony", (g) => g?.url],
+    ["quantity", "2", "2", (g) => String(g?.quantity)],
+  ];
+  for (const [field, answer, expected, stored] of edits) {
+    await tap(owner, `it:edit:${gift.id}`);
+    await tap(owner, `it:f:${field}:${gift.id}`);
+    m = mark();
+    await send(owner, answer);
+    const after = await prisma.wishlistItem.findUnique({ where: { id: gift.id } });
+    check(`поле «${field}» збережено`, String(stored(after)).includes(expected), String(stored(after)));
+    check(`після «${field}» — екран подарунка, не Головна`, !text().includes("Твої списки"), text());
+  }
+  show("S4  редагування полів", since(m, owner.id));
+
+  await tap(owner, `wl:open:${list.id}:0`);
+  check("список показує нову назву", text().includes("Навушники Sony XM6 чорні"), text());
+
   // ── S8 Я дарую ───────────────────────────────────────────────────────────
   m = mark();
   await tap(guest, "res:list:0");
