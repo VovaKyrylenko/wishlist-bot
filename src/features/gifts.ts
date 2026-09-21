@@ -407,9 +407,9 @@ export async function applyGiftAnswer(ctx: MyContext, pending: Pending): Promise
       await renderDraft(ctx, { notice: t.gift.photoPlease });
       return true;
     }
-    await updateDraft(user.id, { imageUrl: photoFileId });
+    const saved = await updateDraft(user.id, { imageUrl: photoFileId });
     await clearPending(ctx, user.id);
-    await renderDraft(ctx, { notice: t.gift.updated });
+    await renderDraft(ctx, { notice: saved ? t.gift.updated : t.common.draftGone });
     return true;
   }
 
@@ -424,6 +424,7 @@ export async function applyGiftAnswer(ctx: MyContext, pending: Pending): Promise
       return true;
     }
 
+    let saved: Draft | null;
     if (field === "quantity") {
       const quantity = parseQuantity(text);
       if (quantity === null) {
@@ -434,13 +435,13 @@ export async function applyGiftAnswer(ctx: MyContext, pending: Pending): Promise
         await renderDraft(ctx, { notice: t.gift.quantityMinOne });
         return true;
       }
-      await updateDraft(user.id, { quantity });
+      saved = await updateDraft(user.id, { quantity });
     } else {
-      await updateDraft(user.id, { [field]: truncate(text, MAX_TITLE_LENGTH) } as DraftFields);
+      saved = await updateDraft(user.id, { [field]: truncate(text, MAX_TITLE_LENGTH) } as DraftFields);
     }
 
     await clearPending(ctx, user.id);
-    await renderDraft(ctx, { notice: t.gift.updated });
+    await renderDraft(ctx, { notice: saved ? t.gift.updated : t.common.draftGone });
     return true;
   }
 
@@ -619,22 +620,22 @@ export function registerGifts(bot: Bot<MyContext>) {
   bot.callbackQuery(/^dr:prio:(HIGH|NORMAL|LOW)$/, async (ctx) => {
     const user = await currentUser(ctx);
     const priority = ctx.match[1] as Priority;
-    await updateDraft(user.id, { priority });
-    await renderDraft(ctx, { notice: t.gift.priorityUpdated(PRIORITY_NAME[priority]) });
+    const saved = await updateDraft(user.id, { priority });
+    await renderDraft(ctx, { notice: saved ? t.gift.priorityUpdated(PRIORITY_NAME[priority]) : t.common.draftGone });
   });
 
   bot.callbackQuery(/^dr:clear:(price|url|store|comment)$/, async (ctx) => {
     const user = await currentUser(ctx);
     await clearPending(ctx, user.id);
-    await updateDraft(user.id, { [ctx.match[1]]: null } as DraftFields);
-    await renderDraft(ctx, { notice: t.gift.updated });
+    const saved = await updateDraft(user.id, { [ctx.match[1]]: null } as DraftFields);
+    await renderDraft(ctx, { notice: saved ? t.gift.updated : t.common.draftGone });
   });
 
   bot.callbackQuery("dr:nophoto", async (ctx) => {
     const user = await currentUser(ctx);
     await clearPending(ctx, user.id);
-    await updateDraft(user.id, { imageUrl: null });
-    await renderDraft(ctx, { notice: t.gift.photoRemoved });
+    const saved = await updateDraft(user.id, { imageUrl: null });
+    await renderDraft(ctx, { notice: saved ? t.gift.photoRemoved : t.common.draftGone });
   });
 
   // ── Редагування збереженого подарунка ────────────────────────────────────
