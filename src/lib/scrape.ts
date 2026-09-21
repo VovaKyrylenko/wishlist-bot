@@ -15,7 +15,7 @@ import type { AnyNode } from "domhandler";
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import { formatPrice, isPlausibleAmount, parseAmount, parsePrice, type ParsedPrice } from "./price.js";
-import { applyGiftName, pageTextForModel, suggestGiftName } from "./gift-name.js";
+import { applyGiftCard, buildPageContext, suggestGiftCard } from "./gift-card.js";
 
 export interface LinkPreview {
   title: string | null;
@@ -27,6 +27,8 @@ export interface LinkPreview {
   priceAmount: number | null;
   priceCurrency: string | null;
   store: string | null;
+  /** One or two sentences the model read off the page; null without a model. */
+  description: string | null;
 }
 
 const REQUEST_TIMEOUT_MS = 8000;
@@ -516,15 +518,14 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
   }
   if (!fetched) return null;
 
-  // Розмітка дає факти, модель дає назву (ADR 0002). Порожня картка теж іде
-  // до моделі: сторінка без жодної розмітки — саме той випадок, де правилам
-  // нема за що вхопитися, а в тексті товар названо словами.
+  // The rules supply facts, the model reads the page like a person and picks
+  // among those facts (ADR 0006). An empty card goes to the model too: a page
+  // with no markup at all is exactly where the rules have nothing to hold on to
+  // and the product is named in prose.
   const parsed = parseLinkPreview(fetched.html, fetched.finalUrl) ?? emptyPreview(fetched.finalUrl);
-  const suggestion = await suggestGiftName(pageTextForModel(fetched.html), {
-    store: parsed.store,
-    hostname: fetched.finalUrl.hostname,
-  });
-  const preview = applyGiftName(parsed, suggestion, fetched.finalUrl.hostname);
+  const context = buildPageContext(fetched.html, fetched.finalUrl, parsed);
+  const suggestion = await suggestGiftCard(context);
+  const preview = applyGiftCard(parsed, suggestion, fetched.finalUrl.hostname);
 
   return preview.title || preview.imageUrl || preview.price ? preview : null;
 }
@@ -537,6 +538,7 @@ function emptyPreview(finalUrl: URL): LinkPreview {
     priceAmount: null,
     priceCurrency: null,
     store: finalUrl.hostname.replace(/^www\./, ""),
+    description: null,
   };
 }
 
@@ -592,6 +594,9 @@ export function parseLinkPreview(html: string, finalUrl: URL): LinkPreview | nul
     priceAmount: price?.amount ?? null,
     priceCurrency: price?.currency ?? null,
     store,
+    // Markup has no place for the sentence a guest actually wants; only the
+    // model fills this, in fetchLinkPreview.
+    description: null,
   };
 }
 

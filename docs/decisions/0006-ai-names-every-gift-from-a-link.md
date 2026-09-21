@@ -1,4 +1,4 @@
-# 0006: Every gift parsed from a link is named by a model, called with plain fetch
+# 0006: A model reads the whole gift card off the page; the code checks its answer
 
 Status: accepted
 Date: 2026-09-21
@@ -26,29 +26,44 @@ live gateway.
 
 ## Decision
 
-Every link lookup asks a model for the gift's name, not only the ones the rules failed on.
+Every link lookup asks a model to read the page and fill the whole card — name, which price is
+today's price, one or two sentences of description, and which photo is the product.
 
-- The rules still run first and still own what they are exact about: price and currency from
-  structured markup, the image, the shop name. The model is asked for the **name**, and for a
-  price only as a fallback when the markup had none.
-- Model `google/gemini-3.5-flash-lite` through the Vercel AI Gateway. Measured on the four
-  cases above: every one named correctly, 0.7-1.2 s, ~$0.0004 per link (~$0.20/month at 500
-  links; the gateway adds no markup).
-- Called with plain `fetch` on the gateway's OpenAI-compatible endpoint with
-  `response_format: { type: "json_schema", strict: true }`, authenticated with
-  `AI_GATEWAY_API_KEY` — the same client shape and the same secret name as
+- **The rules go first and supply facts.** `parseLinkPreview` still extracts title, price,
+  currency, image and shop from markup. Those facts are handed to the model as facts.
+- **The model chooses among candidates, it does not invent.** `buildPageContext`
+  (`src/lib/gift-card.ts`) gives it: the markup facts; every price on the page with the words
+  around it (so it can tell `3 999 ₴` struck through from `2 222 ₴` today and from
+  `222 ₴/міс` in credit); up to ten images that are not thumbnails, the markup's own image
+  first; and the page text **around the `<h1>`**, not the first N characters of the body.
+- **The code checks the answer.** A price is accepted only if that amount appears among the
+  amounts the page itself states, and only through `parsePrice`/`isPlausibleAmount`/`formatPrice`.
+  A photo is accepted only as an index into the list we showed. The name is cut to
+  `MAX_TITLE_LENGTH`; the description is stripped of hashtags and emoji, cut to 300 characters
+  at a sentence end, and dropped if it is too short to be a sentence.
+- **The description becomes the gift's comment** on the draft screen, where the owner can
+  rewrite or clear it before saving.
+- Model `google/gemini-3.5-flash-lite` through the Vercel AI Gateway, called with plain `fetch`
+  on the OpenAI-compatible endpoint with `response_format: { type: "json_schema", strict: true }`,
+  authenticated with `AI_GATEWAY_API_KEY` — the same client shape and secret as
   `scripts/release/notes.ts` (ADR 0001). No new runtime dependency.
-- The model's output is never trusted as-is: the name is trimmed and truncated to
-  `MAX_TITLE_LENGTH`, and any price goes through `parsePrice`/`isPlausibleAmount`/`formatPrice`
-  exactly like every other source.
 - Page text is passed as data inside a delimiter, with a system instruction saying it is data.
-  Only stripped visible text is sent, capped in size.
-- When the model is slow, fails, or no key is configured, the lookup falls back to the
-  rule-based name — except when that name is obviously not a product, where the user is asked
-  to type a name instead. The whole lookup stays inside the existing 8 s budget.
+- When the model is slow, fails, or no key is configured, the card is the rule-based one —
+  except when its title is a generic page name, the shop name or a social wrapper, where the
+  user is asked to type a name instead. The whole lookup stays inside the existing 8 s budget.
 
 ## Alternatives considered
 
+- **Let the markup's price always win, and ask the model only for the name** (the first shape
+  of this decision, 2026-09-21). Simpler, and wrong twice over: markup is often absent, and on
+  the pages where it exists the page still shows an old price, a credit instalment and a
+  neighbour's price — deciding between those is reading, which is what the model is for. The
+  check against the page's own amounts keeps the safety that rule gave.
+- **Give the model the page text and trust its answer.** Measured and rejected: fed the first
+  12 000 characters of a live Allo page, `gemini-3.5-flash-lite` and `gpt-5.4-mini` both
+  returned `6 999 ₴` for a tablet that costs `8 999 ₴` — a number printed nowhere on the page.
+  The truncation had cut the price block away. Facts + candidates + text around the `<h1>` fixed
+  it for three models at once.
 - **AI only as a fallback, when the rules return nothing.** Cheaper, and it was the first shape
   of issue #16. It fails on the actual failure mode: the rules returned `Головна` — a non-empty,
   confidently wrong answer. Making it work needs a "is this name junk?" classifier, which is the
@@ -72,13 +87,19 @@ Every link lookup asks a model for the gift's name, not only the ones the rules 
 
 - Gift names stop being a lottery of what a shop happens to put in `<title>`, which is what
   makes a shared list readable by someone who did not paste the link.
-- Every link now costs a model call (~1 000 input tokens on a real page) and roughly one
-  second. The 3 s "shop is slow" notice absorbs it; the budget's headroom shrinks.
+- Every link now costs a model call (~4 000 input tokens on a real page, ~$0.0015) and about
+  two seconds end to end. The 3 s "shop is slow" notice absorbs it; the budget's headroom
+  shrinks. At 500 links a month that is well under a dollar.
+- Gifts arrive with a description the owner did not write. It lands in the comment, which is
+  visible and editable on the draft screen before saving — but a guest will read whatever the
+  owner leaves there.
 - The bot gains a runtime dependency on an external service. Degradation is designed
   (rule-based name, or ask the user), but a gateway outage makes naming worse than today for
   pages whose rule-based title is junk.
-- **Accepted risk:** the model can be wrong in a plausible way — a name that reads fine but
-  describes the wrong item on a page with several products. The user sees the name on the draft
+- **Accepted risk:** the model can be wrong in a plausible way — the right-looking name,
+  description or photo for the wrong item on a page that lists several. The price is the one
+  field with an independent check (it must exist on the page); name, description and photo rest
+  on the model's reading and on the owner glancing at the draft. The user sees the name on the draft
   screen before saving and can edit it; nothing is posted anywhere without them.
 - **Accepted risk:** pasted pages are untrusted text going into a prompt. Two injection attempts
   were ignored by both candidate models in the spike, and the JSON schema plus our own
@@ -93,12 +114,15 @@ Every link lookup asks a model for the gift's name, not only the ones the rules 
 
 - [ ] The four real failures from issue #16 are asserted and each yields a recognisable product
       name; pages with clean markup keep the names they have today.
-      check: `pnpm test` (`src/lib/gift-name.test.ts`) and `pnpm run verify:scrape`
-- [ ] With no `AI_GATEWAY_API_KEY` set, link lookup still works and no request is made.
+      check: `pnpm test` (`src/lib/gift-card.test.ts`) and `pnpm run verify:scrape`
+- [ ] A price the page does not state is dropped, and a photo index outside the offered list is
+      dropped.
       check: `pnpm test`
-- [ ] A gateway failure leaves the user with today's behaviour rather than an error.
+- [ ] With no `AI_GATEWAY_API_KEY` set, link lookup still works and no request is made; a gateway
+      failure leaves the user with the rule-based card.
       check: `pnpm test`
-- [ ] A real link pasted into the bot produces a named gift within the 8 s budget.
+- [ ] On a live shop page with a struck-through old price, the card shows today's price, the
+      product photo and a readable description, inside the 8 s budget.
       manual: run the lookup against the live gateway → evidence: `docs/verification/feat/ai-gift-naming.md`
 
 ## Supersedes

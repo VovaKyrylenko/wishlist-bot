@@ -260,6 +260,9 @@ async function buildDraftFromUrl(ctx: MyContext, url: string): Promise<DraftFiel
       priceAmount: preview.priceAmount,
       priceCurrency: preview.priceCurrency,
       store: preview.store,
+      // What the shop says the thing is, in one or two sentences. The owner
+      // sees it on the draft screen and can rewrite or clear it before saving.
+      comment: preview.description,
     };
   } finally {
     clearTimeout(slowTimer);

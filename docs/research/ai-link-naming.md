@@ -207,3 +207,51 @@ dependencies in a webhook function, and a Node ≥ 22 / `engines` bump.
 plain-`fetch` client instead, reusing the shape of `scripts/release/notes.ts` and the
 `AI_GATEWAY_API_KEY` secret that ADR 0001 already established. The SDK becomes worth it if we
 later want streaming, tool calls, or automatic multi-model failover.
+
+## Spike 3 — what "let the model read the page" actually does (2026-09-21)
+
+The first two spikes used reconstructed page text. This one used a live Allo product page
+(`Планшет Xiaomi Redmi Pad 2`, 1.67 MB of HTML) and asked for the full card — name, price,
+currency, description, and which of 48 candidate images is the product.
+
+Context: the first 12 000 characters of the stripped body, as the naming implementation did.
+
+| Model | latency | price answered |
+|---|---|---|
+| `google/gemini-3.5-flash-lite` | 1 561 ms | **6 999 ₴** |
+| `openai/gpt-5.4-mini` | 1 811 ms | **6 999 ₴** |
+| `anthropic/claude-haiku-4.5` | 5 452 ms | `null` |
+| `google/gemini-3.6-flash` | 3 346 ms | answer truncated at 500 output tokens |
+
+The page says `9 499 ₴` struck through, `-500 ₴`, `8 999 ₴` today, `375 ₴/міс` in credit.
+**6 999 ₴ appears nowhere on it.** Truncating the body at 12k characters had cut the price
+block away, and both models filled the gap with a plausible number. Our own rules, meanwhile,
+read `8 999 ₴` correctly from JSON-LD.
+
+That is the finding that shaped ADR 0006: a model reading a page is excellent at *choosing* and
+terrible at *not answering*.
+
+## Spike 4 — facts + candidates instead of the first N characters (2026-09-21)
+
+Same page, same models, new context: markup facts first, then every price on the page with ~60
+characters of surrounding text, then the image candidates, then the text around the `<h1>`
+instead of the top of the body. Prompt: 9 109 characters, ~4 100 input tokens.
+
+| Model | latency | price | photo | description |
+|---|---|---|---|---|
+| `gemini-3.5-flash-lite` | 1 494 ms | **8 999 ₴** ✓ | markup image ✓ | 11-дюймовий 2,5K, 90 Гц, 9000 мА·год |
+| `openai/gpt-5.4-mini` | 1 990 ms | **8 999 ₴** ✓ | a 60×72 thumbnail ✗ | fuller, also correct |
+| `gemini-3.6-flash` | 5 539 ms | **8 999 ₴** ✓ | markup image ✓ | correct |
+
+All three now agree with the page. The thumbnail pick led to filtering candidates by the size
+in the URL (`/60x72/` out, `/710x600/` in) — and the first version of that filter was too greedy,
+throwing away the real photo along with the thumbnails; see the verification record.
+
+Second live page (`Мультипіч Xiaomi Air Fryer Essential 6L`): page shows `3 999 ₴` struck
+through, `-1 777 ₴`, `2 222 ₴` today, `222 ₴/міс` in credit, and "інші пропозиції від 4 199 ₴".
+The card came back with `2 222 ₴`, the product photo and a two-sentence description, in 2 018 ms.
+
+**Verdict: `google/gemini-3.5-flash-lite` — STEAL**, now for the whole card rather than the name
+alone: fastest of the three, correct on both live pages, ~$0.0015 per link at this prompt size.
+`openai/gpt-5.4-mini` stays the documented fallback. `gemini-3.6-flash` needs a much larger
+output budget for the same answer.

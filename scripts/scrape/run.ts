@@ -7,12 +7,13 @@
 
 import { parseLinkPreview, decodeHtml, cleanTitle } from "../../src/lib/scrape.js";
 import {
-  applyGiftName,
-  pageTextForModel,
+  applyGiftCard,
+  buildPageContext,
   readAnswer,
-  suggestGiftName,
-  type GiftNameSuggestion,
-} from "../../src/lib/gift-name.js";
+  suggestGiftCard,
+  type GiftCardSuggestion,
+  type PageContext,
+} from "../../src/lib/gift-card.js";
 import { parsePrice, formatPrice, structurePrice } from "../../src/lib/price.js";
 
 const failures: string[] = [];
@@ -320,15 +321,20 @@ group("фото");
 }
 
 // 13. Назва від моделі — чотири реальні провали зі списку 2026-09-21 (#16).
-group("назва від моделі: сторінки, де розмітка бреше");
+group("картка від моделі: сторінки, де розмітка бреше");
 {
-  const named = (html: string, href: string, suggestion: GiftNameSuggestion | null) => {
+  const named = (html: string, href: string, suggestion: GiftCardSuggestion | null) => {
     const finalUrl = url(href);
     const parsed = parseLinkPreview(html, finalUrl)!;
-    return applyGiftName(parsed, suggestion, finalUrl.hostname);
+    return applyGiftCard(parsed, suggestion, finalUrl.hostname);
   };
 
-  const say = (name: string | null): GiftNameSuggestion => ({ name, price: null });
+  const say = (name: string | null): GiftCardSuggestion => ({
+    name,
+    price: null,
+    description: null,
+    imageUrl: null,
+  });
 
   // 1-2. Магазин без розмітки товару: заголовок вкладки — назва сайту.
   const homeTitle = `<html><head><title>Головна</title></head>
@@ -378,72 +384,75 @@ group("назва від моделі: сторінки, де розмітка �
   check("чиста розмітка: ціна з розмітки", control.price, "12 999 ₴");
 }
 
-// 14. Чия ціна перемагає і що робиться з вигадками моделі.
-group("назва від моделі: межі довіри");
+// 14. Що модель може змінити в картці, а що лишається з розмітки.
+group("картка від моделі: межі довіри");
 {
-  const card = {
-    title: "Головна",
-    imageUrl: null,
-    price: "12 999 ₴",
-    priceAmount: 12999,
-    priceCurrency: "UAH",
-    store: "ROZETKA",
-  };
+  const page: PageContext = { prompt: "", images: ["https://cdn.shop.ua/tablet.jpg"], amounts: [9499, 8999] };
 
-  const withModelPrice = applyGiftName(
-    card,
-    { name: "Навушники Sony", price: { text: "9 999 ₴", amount: 9999, currency: "UAH" } },
-    "rozetka.com.ua",
-  );
-  check("ціна з розмітки сильніша за ціну моделі", withModelPrice.price, "12 999 ₴");
-  check("сума з розмітки лишається", withModelPrice.priceAmount, 12999);
+  // Стара ціна поруч із новою: модель читає сторінку як людина й бере ту, за
+  // якою купують сьогодні. Число мусить бути на сторінці — інакше не беремо.
+  const chosen = readAnswer(
+    '{"name":"Планшет Xiaomi Redmi Pad 2","price":"8999","currency":"UAH","description":"Планшет з 11-дюймовим екраном.","image":0}',
+    page,
+  )!;
+  check("модель обирає актуальну ціну", chosen.price?.text, "8 999 ₴");
+  check("фото береться зі списку кандидатів", chosen.imageUrl, "https://cdn.shop.ua/tablet.jpg");
+  check("опис лишається людським реченням", chosen.description, "Планшет з 11-дюймовим екраном.");
 
-  const noMarkupPrice = applyGiftName(
-    { ...card, price: null, priceAmount: null, priceCurrency: null },
-    { name: "Навушники Sony", price: { text: "9 999 ₴", amount: 9999, currency: "UAH" } },
-    "rozetka.com.ua",
-  );
-  check("без ціни в розмітці береться ціна моделі", noMarkupPrice.price, "9 999 ₴");
-  check("без ціни в розмітці береться сума моделі", noMarkupPrice.priceAmount, 9999);
+  // Реальний випадок: на сторінці Allo модель назвала 6 999 ₴ там, де товар
+  // коштує 8 999 ₴. Такої суми на сторінці немає — відкидаємо.
+  const invented = readAnswer(
+    '{"name":"Планшет","price":"6999","currency":"UAH","description":null,"image":null}',
+    page,
+  )!;
+  check("вигадана ціна відкидається", invented.price, null);
 
-  check("порожня назва від моделі = товару немає", applyGiftName(card, { name: null, price: null }, "rozetka.com.ua").title, null);
-}
-
-// 15. Відповідь моделі — це текст із чужої сторінки, а не істина.
-group("розбір відповіді моделі");
-{
-  check("звичайна відповідь", readAnswer('{"name":"Кейп з тканини букле","price":"2400","currency":"UAH"}')!.name, "Кейп з тканини букле");
   check(
-    "markdown-огорожа знімається",
-    readAnswer('```json\n{"name":"Термокружка Stanley","price":null,"currency":null}\n```')!.name,
-    "Термокружка Stanley",
+    "неіснуючий номер фото відкидається",
+    readAnswer('{"name":"A","price":null,"currency":null,"description":null,"image":7}', page)!.imageUrl,
+    null,
   );
-  check("лапки навколо всієї назви знімаються", readAnswer('{"name":"«Кейп букле»","price":null,"currency":null}')!.name, "Кейп букле");
-  check("порожня назва — це null", readAnswer('{"name":"","price":null,"currency":null}')!.name, null);
-  check("не JSON — нічого", readAnswer("на жаль, не можу"), null);
 
-  // Ціна моделі йде тим самим парсером: «грн» стає UAH, вигляд канонічний.
-  const price = readAnswer('{"name":"Кейп","price":"2 400","currency":"грн"}')!.price;
-  check("ціна моделі канонізується", price?.text, "2 400 ₴");
-  check("валюта моделі за ISO", price?.currency, "UAH");
+  const preview = {
+    title: "Головна",
+    imageUrl: "https://cdn.shop.ua/banner.jpg",
+    price: "9 499 ₴",
+    priceAmount: 9499,
+    priceCurrency: "UAH",
+    store: "allo.ua",
+    description: null,
+  };
+  const merged = applyGiftCard(preview, chosen, "allo.ua");
+  check("у картці ціна від моделі", merged.price, "8 999 ₴");
+  check("у картці фото від моделі", merged.imageUrl, "https://cdn.shop.ua/tablet.jpg");
+  check("у картці опис від моделі", Boolean(merged.description), true);
 
-  // Неправдоподібна сума відкидається, а не показується.
-  check("нуль — не ціна", readAnswer('{"name":"Кейп","price":"0","currency":"UAH"}')!.price, null);
-  check("сума завбільшки з телефон відкидається", readAnswer('{"name":"Кейп","price":"380671234567","currency":"UAH"}')!.price, null);
-  check("ціна без числа відкидається", readAnswer('{"name":"Кейп","price":"договірна","currency":null}')!.price, null);
+  const withoutModel = applyGiftCard(preview, null, "allo.ua");
+  check("без моделі ціна лишається з розмітки", withoutModel.price, "9 499 ₴");
+  check("без моделі опису немає", withoutModel.description, null);
 }
 
-// 16. Що саме надсилається моделі й коли не надсилається нічого.
-group("текст сторінки для моделі");
+// 15. Контекст, який отримує модель: факти, кандидати, текст навколо товару.
+group("контекст для моделі");
 {
-  const html = `<html><head><style>.a{color:red}</style><script>var x = "Купи зараз";</script></head>
-    <body><h1>Кейп букле</h1><p>2 400 грн</p><noscript>увімкни JS</noscript></body></html>`;
-  const text = pageTextForModel(html);
-  check("скрипти не потрапляють у текст", text.includes("var x"), false);
-  check("стилі не потрапляють у текст", text.includes("color:red"), false);
-  check("noscript не потрапляє у текст", text.includes("увімкни JS"), false);
-  check("товар у тексті є", text.includes("Кейп букле"), true);
-  check("ціна в тексті є", text.includes("2 400 грн"), true);
+  const html = `<html><head><meta property="og:title" content="Планшет"><script>var x = "Купи зараз";</script>
+    <style>.a{color:red}</style></head><body>
+    <nav>Каталог Кошик</nav>
+    <h1>Планшет Xiaomi Redmi Pad 2</h1>
+    <div>9 499 ₴</div><div>8 999 ₴</div><div>375 ₴/міс</div>
+    <img src="/logo-60x72.png" alt="лого">
+    <img src="https://cdn.allo.ua/tablet.webp" alt="Фото № 1">
+    <p>Планшет з 11-дюймовим екраном.</p>
+    <footer>© 2026</footer></body></html>`;
+  const context = buildPageContext(html, url("https://allo.ua/p/1"), null);
+
+  check("усі ціни сторінки — кандидати", context.amounts.includes(8999) && context.amounts.includes(9499), true);
+  check("платіж у кредит теж видно моделі, з оточенням", context.prompt.includes("₴/міс"), true);
+  check("мініатюри не пропонуються", context.images.some((i) => i.includes("60x72")), false);
+  check("фото товару пропонується", context.images.includes("https://cdn.allo.ua/tablet.webp"), true);
+  check("скрипти не йдуть у модель", context.prompt.includes("Купи зараз"), false);
+  check("навігація не йде в модель", context.prompt.includes("Каталог Кошик"), false);
+  check("текст навколо товару йде в модель", context.prompt.includes("11-дюймовим"), true);
 }
 
 // Без ключа модель не викликається взагалі: перевірка ходить у мережу рівно
@@ -460,7 +469,7 @@ group("без ключа — жодного виклику");
     throw new Error("фікстури не ходять у мережу");
   }) as typeof fetch;
 
-  const suggestion = await suggestGiftName("Кейп з тканини букле, 2 400 грн", { hostname: "shop.ua" });
+  const suggestion = await suggestGiftCard({ prompt: "Кейп з тканини букле", images: [], amounts: [] });
   check("без ключа відповіді немає", suggestion, null);
   check("без ключа мережі немає", calls, 0);
 

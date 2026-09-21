@@ -61,3 +61,32 @@ cases are covered by fixtures (run 1) and, on reconstructed page text, by the sp
 
 `pnpm run verify:flows` was not run: it needs a staging database, and this change does not touch
 the conversation flow — only what `fetchLinkPreview` returns.
+
+## Run 3 — the whole card, on live shop pages (2026-09-21)
+
+VERDICT: PASS
+CLAIM:   On a real product page the card shows today's price, the product photo and a readable
+         description, and a price the page never states is refused.
+METHOD:  `fetchLinkPreview` against live pages through the live AI Gateway (`VERCEL_OIDC_TOKEN`
+         passed as `AI_GATEWAY_API_KEY`), plus `pnpm test` and `pnpm run verify:scrape` offline.
+STEPS:
+  1. `allo.ua` tablet — page shows `9 499 ₴` struck through, `-500 ₴`, `8 999 ₴`, `375 ₴/міс`
+     -> `Планшет Xiaomi Redmi Pad 2 WiFi 4/128GB Graphite Gray`, `8 999 ₴`, the 710×600 product
+     photo, "Планшет обладнаний 11-дюймовим 2,5K-дисплеєм…", 1 858 ms.
+  2. `allo.ua` air fryer — page shows `3 999 ₴`, `-1 777 ₴`, `2 222 ₴`, `222 ₴/міс`, and other
+     offers "від 4 199 ₴"
+     -> `Мультипіч Xiaomi Air Fryer Essential 6L`, `2 222 ₴`, product photo, two sentences,
+     2 018 ms.
+  3. `goodwine.ua` (a shop front, not a product)
+     -> name from markup kept, no price, no description, 1 141 ms.
+  4. Offline: a model answer of `6 999 ₴` against a page stating 9 499 / 8 999 / 375
+     -> refused, card keeps the markup price.
+EVIDENCE: `Test Files 8 passed (8)` · `Tests 150 passed (150)`; `Усі перевірки пройдено`.
+FINDINGS: Three defects, each found by running the thing rather than by reading it:
+  - The first image filter rejected any `WxH` in a URL, so Allo's real `/710x600/` photo was
+    thrown out with the `/60x72/` thumbnails and the model picked an editorial "Rich_Review"
+    image instead. Now only sides under 200 px are dropped.
+  - `cheerio.text()` glues neighbouring blocks: `<div>9 499 ₴</div><div>8 999 ₴</div>` became
+    `9 499 ₴8 999 ₴`. Tags are replaced with spaces before the text is read.
+  - The price scanner read `Redmi Pad 2` + `9 499 ₴` as `29 499 ₴`, because grouped thousands
+    were matched loosely. Groups must now look like groups.
