@@ -66,7 +66,10 @@ WEBHOOK_SECRET=  # будь-який випадковий рядок — зах�
 WEBHOOK_URL=     # https://<ваш-проєкт>.vercel.app/api/webhook (потрібен лише для set-webhook)
 DATABASE_URL=            # Neon, пул-з'єднання
 DATABASE_URL_UNPOOLED=   # Neon, пряме з'єднання (для міграцій)
+AI_GATEWAY_API_KEY=      # ключ Vercel AI Gateway — назви подарунків із посилань
 ```
+
+Без `AI_GATEWAY_API_KEY` бот працює: назву бере з розмітки сторінки, а там, де розмітка дає сміття («Головна», назва магазину, підпис з Instagram), просить написати назву самому. Ключ створюється в розділі AI Gateway на Vercel; модель і ендпоінт можна перевизначити через `AI_GIFT_NAME_MODEL` та `AI_GATEWAY_URL` (ADR 0006).
 
 `DATABASE_URL` / `DATABASE_URL_UNPOOLED` уже підтягнуті автоматично, якщо проєкт залінкований з Vercel і підключена інтеграція Neon (`vercel env pull .env.local`, потім скопіюйте в `.env`).
 

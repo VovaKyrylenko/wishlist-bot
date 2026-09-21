@@ -15,6 +15,7 @@ import type { AnyNode } from "domhandler";
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import { formatPrice, isPlausibleAmount, parseAmount, parsePrice, type ParsedPrice } from "./price.js";
+import { applyGiftName, pageTextForModel, suggestGiftName } from "./gift-name.js";
 
 export interface LinkPreview {
   title: string | null;
@@ -515,7 +516,28 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
   }
   if (!fetched) return null;
 
-  return parseLinkPreview(fetched.html, fetched.finalUrl);
+  // Розмітка дає факти, модель дає назву (ADR 0002). Порожня картка теж іде
+  // до моделі: сторінка без жодної розмітки — саме той випадок, де правилам
+  // нема за що вхопитися, а в тексті товар названо словами.
+  const parsed = parseLinkPreview(fetched.html, fetched.finalUrl) ?? emptyPreview(fetched.finalUrl);
+  const suggestion = await suggestGiftName(pageTextForModel(fetched.html), {
+    store: parsed.store,
+    hostname: fetched.finalUrl.hostname,
+  });
+  const preview = applyGiftName(parsed, suggestion, fetched.finalUrl.hostname);
+
+  return preview.title || preview.imageUrl || preview.price ? preview : null;
+}
+
+function emptyPreview(finalUrl: URL): LinkPreview {
+  return {
+    title: null,
+    imageUrl: null,
+    price: null,
+    priceAmount: null,
+    priceCurrency: null,
+    store: finalUrl.hostname.replace(/^www\./, ""),
+  };
 }
 
 /** Split out from the fetch so the extraction rules can be exercised directly. */

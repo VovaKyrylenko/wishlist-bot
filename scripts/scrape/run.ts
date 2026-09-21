@@ -6,6 +6,13 @@
 // не «не впало», а що саме людина побачить у картці подарунка.
 
 import { parseLinkPreview, decodeHtml, cleanTitle } from "../../src/lib/scrape.js";
+import {
+  applyGiftName,
+  pageTextForModel,
+  readAnswer,
+  suggestGiftName,
+  type GiftNameSuggestion,
+} from "../../src/lib/gift-name.js";
 import { parsePrice, formatPrice, structurePrice } from "../../src/lib/price.js";
 
 const failures: string[] = [];
@@ -310,6 +317,155 @@ group("фото");
   check("protocol-relative добудовується", withImage("//cdn.shop.ua/a.jpg"), "https://cdn.shop.ua/a.jpg");
   check("svg відкидається", withImage("https://cdn.shop.ua/logo.svg"), null);
   check("data: відкидається", withImage("data:image/png;base64,iVBORw0KGgo="), null);
+}
+
+// 13. Назва від моделі — чотири реальні провали зі списку 2026-09-21 (#16).
+group("назва від моделі: сторінки, де розмітка бреше");
+{
+  const named = (html: string, href: string, suggestion: GiftNameSuggestion | null) => {
+    const finalUrl = url(href);
+    const parsed = parseLinkPreview(html, finalUrl)!;
+    return applyGiftName(parsed, suggestion, finalUrl.hostname);
+  };
+
+  const say = (name: string | null): GiftNameSuggestion => ({ name, price: null });
+
+  // 1-2. Магазин без розмітки товару: заголовок вкладки — назва сайту.
+  const homeTitle = `<html><head><title>Головна</title></head>
+    <body><h1>Головна</h1><p>Свічка соєва ручної роботи «Лаванда», 250 мл — 1 900 грн</p></body></html>`;
+  check(
+    "«Головна» замінюється назвою від моделі",
+    named(homeTitle, "https://kvitka.com.ua/p/12", say("Свічка соєва «Лаванда», 250 мл")).title,
+    "Свічка соєва «Лаванда», 250 мл",
+  );
+  check(
+    "без моделі «Головна» не показується зовсім",
+    named(homeTitle, "https://kvitka.com.ua/p/12", null).title,
+    null,
+  );
+
+  // 8. Увесь заголовок — назва магазину.
+  const shopName = `<html><head><meta property="og:site_name" content="Інтернет магазин кави">
+    <title>Інтернет магазин кави</title></head><body>Кава в зернах Ефіопія Іргачеффе, 500 г</body></html>`;
+  check(
+    "назва магазину замінюється товаром",
+    named(shopName, "https://kava.ua/item/77", say("Кава в зернах Ефіопія Іргачеффе, 500 г")).title,
+    "Кава в зернах Ефіопія Іргачеффе, 500 г",
+  );
+  check("без моделі назва магазину не показується", named(shopName, "https://kava.ua/item/77", null).title, null);
+
+  // 5-6. Instagram загортає підпис у свій шаблон; товар — усередині підпису.
+  const instagram = `<html><head><meta property="og:title" content='УКРАЇНСЬКИЙ БРЕНД ОДЯГУ в Instagram: "NEW | Кейп з тканини букле, оверсайз"'>
+    </head><body></body></html>`;
+  check(
+    "підпис Instagram замінюється товаром",
+    named(instagram, "https://www.instagram.com/p/ABC/", say("Кейп з тканини букле")).title,
+    "Кейп з тканини букле",
+  );
+  check(
+    "без моделі шаблон Instagram не показується",
+    named(instagram, "https://www.instagram.com/p/ABC/", null).title,
+    null,
+  );
+
+  // Контроль: сторінка, яку правила й сьогодні читають правильно.
+  const clean = `<html><head><meta property="og:site_name" content="ROZETKA">
+    <title>Навушники Sony WH-1000XM6 Black — ROZETKA</title>
+    <meta property="product:price:amount" content="12999">
+    <meta property="product:price:currency" content="UAH"></head><body></body></html>`;
+  const control = named(clean, "https://rozetka.com.ua/p123/", null);
+  check("чиста розмітка без моделі не псується", control.title, "Навушники Sony WH-1000XM6 Black");
+  check("чиста розмітка: ціна з розмітки", control.price, "12 999 ₴");
+}
+
+// 14. Чия ціна перемагає і що робиться з вигадками моделі.
+group("назва від моделі: межі довіри");
+{
+  const card = {
+    title: "Головна",
+    imageUrl: null,
+    price: "12 999 ₴",
+    priceAmount: 12999,
+    priceCurrency: "UAH",
+    store: "ROZETKA",
+  };
+
+  const withModelPrice = applyGiftName(
+    card,
+    { name: "Навушники Sony", price: { text: "9 999 ₴", amount: 9999, currency: "UAH" } },
+    "rozetka.com.ua",
+  );
+  check("ціна з розмітки сильніша за ціну моделі", withModelPrice.price, "12 999 ₴");
+  check("сума з розмітки лишається", withModelPrice.priceAmount, 12999);
+
+  const noMarkupPrice = applyGiftName(
+    { ...card, price: null, priceAmount: null, priceCurrency: null },
+    { name: "Навушники Sony", price: { text: "9 999 ₴", amount: 9999, currency: "UAH" } },
+    "rozetka.com.ua",
+  );
+  check("без ціни в розмітці береться ціна моделі", noMarkupPrice.price, "9 999 ₴");
+  check("без ціни в розмітці береться сума моделі", noMarkupPrice.priceAmount, 9999);
+
+  check("порожня назва від моделі = товару немає", applyGiftName(card, { name: null, price: null }, "rozetka.com.ua").title, null);
+}
+
+// 15. Відповідь моделі — це текст із чужої сторінки, а не істина.
+group("розбір відповіді моделі");
+{
+  check("звичайна відповідь", readAnswer('{"name":"Кейп з тканини букле","price":"2400","currency":"UAH"}')!.name, "Кейп з тканини букле");
+  check(
+    "markdown-огорожа знімається",
+    readAnswer('```json\n{"name":"Термокружка Stanley","price":null,"currency":null}\n```')!.name,
+    "Термокружка Stanley",
+  );
+  check("лапки навколо всієї назви знімаються", readAnswer('{"name":"«Кейп букле»","price":null,"currency":null}')!.name, "Кейп букле");
+  check("порожня назва — це null", readAnswer('{"name":"","price":null,"currency":null}')!.name, null);
+  check("не JSON — нічого", readAnswer("на жаль, не можу"), null);
+
+  // Ціна моделі йде тим самим парсером: «грн» стає UAH, вигляд канонічний.
+  const price = readAnswer('{"name":"Кейп","price":"2 400","currency":"грн"}')!.price;
+  check("ціна моделі канонізується", price?.text, "2 400 ₴");
+  check("валюта моделі за ISO", price?.currency, "UAH");
+
+  // Неправдоподібна сума відкидається, а не показується.
+  check("нуль — не ціна", readAnswer('{"name":"Кейп","price":"0","currency":"UAH"}')!.price, null);
+  check("сума завбільшки з телефон відкидається", readAnswer('{"name":"Кейп","price":"380671234567","currency":"UAH"}')!.price, null);
+  check("ціна без числа відкидається", readAnswer('{"name":"Кейп","price":"договірна","currency":null}')!.price, null);
+}
+
+// 16. Що саме надсилається моделі й коли не надсилається нічого.
+group("текст сторінки для моделі");
+{
+  const html = `<html><head><style>.a{color:red}</style><script>var x = "Купи зараз";</script></head>
+    <body><h1>Кейп букле</h1><p>2 400 грн</p><noscript>увімкни JS</noscript></body></html>`;
+  const text = pageTextForModel(html);
+  check("скрипти не потрапляють у текст", text.includes("var x"), false);
+  check("стилі не потрапляють у текст", text.includes("color:red"), false);
+  check("noscript не потрапляє у текст", text.includes("увімкни JS"), false);
+  check("товар у тексті є", text.includes("Кейп букле"), true);
+  check("ціна в тексті є", text.includes("2 400 грн"), true);
+}
+
+// Без ключа модель не викликається взагалі: перевірка ходить у мережу рівно
+// нуль разів, і саме це тут і доводиться.
+group("без ключа — жодного виклику");
+{
+  const key = process.env.AI_GATEWAY_API_KEY;
+  delete process.env.AI_GATEWAY_API_KEY;
+
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("фікстури не ходять у мережу");
+  }) as typeof fetch;
+
+  const suggestion = await suggestGiftName("Кейп з тканини букле, 2 400 грн", { hostname: "shop.ua" });
+  check("без ключа відповіді немає", suggestion, null);
+  check("без ключа мережі немає", calls, 0);
+
+  globalThis.fetch = realFetch;
+  if (key !== undefined) process.env.AI_GATEWAY_API_KEY = key;
 }
 
 if (failures.length === 0) {
