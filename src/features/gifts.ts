@@ -13,7 +13,8 @@ import { prisma } from "../db.js";
 import { currentUser } from "../lib/users.js";
 import { fetchLinkPreview } from "../lib/scrape.js";
 import { computeAvailability, holdingReservations } from "../lib/availability.js";
-import { escapeHtml, PRIORITY_NAME } from "../lib/format.js";
+import { escapeHtml, isHttpUrl, normalizeUrl, PRIORITY_NAME } from "../lib/format.js";
+import { structurePrice } from "../lib/price.js";
 import { clearPending, type Pending } from "../lib/pending.js";
 import { ask, MAX_ANSWER_LENGTH } from "../lib/prompt.js";
 import { dropDraft, getDraft, startDraft, updateDraft, type DraftFields } from "../lib/drafts.js";
@@ -77,7 +78,7 @@ export async function renderGift(
   const index = siblings.findIndex((s) => s.id === gift.id);
 
   const kb = new InlineKeyboard();
-  if (gift.url) kb.url(t.buttons.whereToBuy, gift.url).row();
+  if (gift.url && isHttpUrl(gift.url)) kb.url(t.buttons.whereToBuy, gift.url).row();
   if (!finished) {
     kb.text(t.buttons.edit, `it:edit:${gift.id}`).row();
     if (siblings.length > 1) {
@@ -256,7 +257,12 @@ async function buildDraftFromUrl(ctx: MyContext, url: string): Promise<DraftFiel
       title: truncate(preview.title, MAX_TITLE_LENGTH),
       imageUrl: preview.imageUrl,
       price: preview.price,
+      priceAmount: preview.priceAmount,
+      priceCurrency: preview.priceCurrency,
       store: preview.store,
+      // What the shop says the thing is, in one or two sentences. The owner
+      // sees it on the draft screen and can rewrite or clear it before saving.
+      comment: preview.description,
     };
   } finally {
     clearTimeout(slowTimer);
@@ -324,6 +330,12 @@ async function saveDraft(ctx: MyContext) {
     await dropDraft(user.id);
     return;
   }
+  // The list may have been finished while the draft sat open. The draft is
+  // kept: reopening the list makes the same "✅ Додати" work again.
+  if (access.wishlist.status === "ARCHIVED") {
+    await renderList(ctx, draft.wishlistId, 0, { notice: t.gift.addToFinished });
+    return;
+  }
 
   const maxSort = await prisma.wishlistItem.aggregate({
     where: { wishlistId: draft.wishlistId },
@@ -336,6 +348,8 @@ async function saveDraft(ctx: MyContext) {
       url: draft.url,
       imageUrl: draft.imageUrl,
       price: draft.price,
+      priceAmount: draft.priceAmount,
+      priceCurrency: draft.priceCurrency,
       store: draft.store,
       comment: draft.comment,
       quantity: draft.quantity,
@@ -436,6 +450,26 @@ export async function applyGiftAnswer(ctx: MyContext, pending: Pending): Promise
         return true;
       }
       saved = await updateDraft(user.id, { quantity });
+    } else if (field === "url") {
+      // An invalid URL cannot be stored: Telegram rejects the whole keyboard
+      // over one bad kb.url(...) and the gift's screen stops rendering.
+      const url = normalizeUrl(text);
+      if (!url) {
+        await renderDraft(ctx, { notice: t.gift.urlInvalid });
+        return true;
+      }
+      saved = await updateDraft(user.id, { url });
+    } else if (field === "price") {
+      // Whatever the person typed stays the display text verbatim — "від
+      // 2 000 грн" is a perfectly good price. The structured half is set only
+      // when it reads as a clean number, so a future sort/filter never has to
+      // reparse it.
+      const structured = structurePrice(text);
+      saved = await updateDraft(user.id, {
+        price: structured ? structured.text : truncate(text, MAX_TITLE_LENGTH),
+        priceAmount: structured?.amount ?? null,
+        priceCurrency: structured?.currency ?? null,
+      });
     } else {
       saved = await updateDraft(user.id, { [field]: truncate(text, MAX_TITLE_LENGTH) } as DraftFields);
     }
@@ -478,6 +512,34 @@ export async function applyGiftAnswer(ctx: MyContext, pending: Pending): Promise
   }
   if (text.length > MAX_ANSWER_LENGTH) {
     await renderGift(ctx, giftId, 0, { notice: t.common.tooLong(MAX_ANSWER_LENGTH) });
+    return true;
+  }
+
+  if (field === "url") {
+    // Same rule as the draft: a bad URL would take the whole screen down.
+    const url = normalizeUrl(text);
+    if (!url) {
+      await renderGift(ctx, giftId, 0, { notice: t.gift.urlInvalid });
+      return true;
+    }
+    await prisma.wishlistItem.update({ where: { id: giftId }, data: { url } });
+    await clearPending(ctx, user.id);
+    await renderGift(ctx, giftId, 0, { notice: t.gift.updated });
+    return true;
+  }
+
+  if (field === "price") {
+    const structured = structurePrice(text);
+    await prisma.wishlistItem.update({
+      where: { id: giftId },
+      data: {
+        price: structured ? structured.text : truncate(text, MAX_TITLE_LENGTH),
+        priceAmount: structured?.amount ?? null,
+        priceCurrency: structured?.currency ?? null,
+      },
+    });
+    await clearPending(ctx, user.id);
+    await renderGift(ctx, giftId, 0, { notice: t.gift.updated });
     return true;
   }
 
@@ -535,6 +597,12 @@ export function registerGifts(bot: Bot<MyContext>) {
   bot.callbackQuery(/^it:add:([^:]+)$/, async (ctx) => {
     const access = await requireList(ctx, ctx.match[1]);
     if (!access) return;
+    // The list screen hides this button once the list is finished, but old
+    // messages keep working by design — so the rule is enforced here too.
+    if (access.wishlist.status === "ARCHIVED") {
+      await renderList(ctx, ctx.match[1], 0, { notice: t.gift.addToFinished });
+      return;
+    }
     const user = await currentUser(ctx);
     await startDraft(user.id, { wishlistId: ctx.match[1] });
     await ask(ctx, "draft.input", {
@@ -575,6 +643,10 @@ export function registerGifts(bot: Bot<MyContext>) {
   bot.callbackQuery(/^dr:to:([^:]+)$/, async (ctx) => {
     const access = await requireList(ctx, ctx.match[1]);
     if (!access) return;
+    if (access.wishlist.status === "ARCHIVED") {
+      await renderList(ctx, ctx.match[1], 0, { notice: t.gift.addToFinished });
+      return;
+    }
     const user = await currentUser(ctx);
     await updateDraft(user.id, { wishlistId: ctx.match[1] });
     await renderDraft(ctx);
@@ -625,9 +697,14 @@ export function registerGifts(bot: Bot<MyContext>) {
   });
 
   bot.callbackQuery(/^dr:clear:(price|url|store|comment)$/, async (ctx) => {
+    const field = ctx.match[1] as "price" | "url" | "store" | "comment";
     const user = await currentUser(ctx);
     await clearPending(ctx, user.id);
-    const saved = await updateDraft(user.id, { [ctx.match[1]]: null } as DraftFields);
+    const fields: DraftFields = { [field]: null } as DraftFields;
+    // Clearing the price clears both halves — a stale amount left behind
+    // would say "0 ₴" was ever a real price.
+    if (field === "price") Object.assign(fields, { priceAmount: null, priceCurrency: null });
+    const saved = await updateDraft(user.id, fields);
     await renderDraft(ctx, { notice: saved ? t.gift.updated : t.common.draftGone });
   });
 
@@ -671,10 +748,10 @@ export function registerGifts(bot: Bot<MyContext>) {
     if (!gift || !(await requireList(ctx, gift.wishlistId))) return;
     const user = await currentUser(ctx);
     await clearPending(ctx, user.id);
-    await prisma.wishlistItem.update({
-      where: { id: giftId },
-      data: { [field === "photo" ? "imageUrl" : field]: null },
-    });
+    const data: Record<string, null> = { [field === "photo" ? "imageUrl" : field]: null };
+    // Same as the draft: a cleared price cannot leave a stale amount behind.
+    if (field === "price") Object.assign(data, { priceAmount: null, priceCurrency: null });
+    await prisma.wishlistItem.update({ where: { id: giftId }, data });
     await renderGift(ctx, giftId, 0, {
       notice: field === "photo" ? t.gift.photoRemoved : t.gift.updated,
     });

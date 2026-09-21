@@ -1,15 +1,42 @@
+// Reading a product page the way a shop meant it to be read.
+//
+// Shops describe the same product in up to four places, and they disagree:
+// JSON-LD is the cleanest (ISO currency, dot decimals, no site name glued to
+// the title), microdata is next, OpenGraph is written for social previews, and
+// the visible DOM is a last resort full of struck-through old prices. So every
+// field is taken from the best source that has it, and only falls through when
+// that source is silent — never "whatever matched first".
+//
+// The prize is a card the user does not have to fix: the right name, the right
+// price, in one currency format.
+
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
+import { formatPrice, isPlausibleAmount, parseAmount, parsePrice, type ParsedPrice } from "./price.js";
+import { applyGiftCard, buildPageContext, suggestGiftCard } from "./gift-card.js";
 
 export interface LinkPreview {
   title: string | null;
   imageUrl: string | null;
+  /** Canonical and localised: "12 999 ₴", never "12999.00". */
   price: string | null;
+  /** The same price as a plain number, when the source gave one — null for
+   * whatever the DOM fallback could not pin down to an actual figure. */
+  priceAmount: number | null;
+  priceCurrency: string | null;
   store: string | null;
+  /** One or two sentences the model read off the page; null without a model. */
+  description: string | null;
 }
 
-const REQUEST_TIMEOUT_MS = 8000;
+/**
+ * One budget for the whole lookup, not per step: the fetch used to get 8 s on
+ * *every* redirect hop, and the model's 5 s sat on top of that, so a slow shop
+ * could hold the "🔎 Дивлюся, що там…" screen for half a minute.
+ */
+const LOOKUP_BUDGET_MS = 8000;
 const MAX_REDIRECTS = 3;
 /** Plenty for a `<head>`; a product page that needs more is not worth the memory. */
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -104,18 +131,24 @@ async function assertPublicUrl(url: URL): Promise<void> {
  * "follow"` would happily land on a public URL that bounces to
  * 169.254.169.254.
  */
-async function fetchHtml(startUrl: string): Promise<{ html: string; finalUrl: URL } | null> {
+async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: string; finalUrl: URL } | null> {
   let current = new URL(startUrl);
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     await assertPublicUrl(current);
 
+    const left = deadline - Date.now();
+    if (left <= 0) return null;
+
     const res = await fetch(current, {
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(left),
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; WishlistBot/1.0; +https://t.me)",
         Accept: "text/html,application/xhtml+xml",
+        // Ukrainian shops serve a Russian or English title otherwise, and the
+        // gift ends up in a language the user did not paste.
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.6",
       },
     });
 
@@ -128,21 +161,23 @@ async function fetchHtml(startUrl: string): Promise<{ html: string; finalUrl: UR
     }
 
     if (!res.ok) return null;
-    if (!(res.headers.get("content-type") ?? "").includes("text/html")) {
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
       await res.body?.cancel();
       return null;
     }
 
-    return { html: await readCapped(res), finalUrl: current };
+    const bytes = await readCapped(res);
+    return { html: decodeHtml(bytes, contentType), finalUrl: current };
   }
 
   return null;
 }
 
 /** Reads at most {@link MAX_BYTES}, so a huge or endless response cannot OOM us. */
-async function readCapped(res: Response): Promise<string> {
+async function readCapped(res: Response): Promise<Buffer> {
   const reader = res.body?.getReader();
-  if (!reader) return "";
+  if (!reader) return Buffer.alloc(0);
 
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -156,87 +191,365 @@ async function readCapped(res: Response): Promise<string> {
     }
     chunks.push(value);
   }
-  return new TextDecoder("utf-8").decode(Buffer.concat(chunks));
+  return Buffer.concat(chunks);
 }
-
-const CURRENCY = "(?:₴|грн|UAH|\\$|USD|€|EUR|zł|PLN)";
-/** Thousands separators in the wild: space, non-breaking space, narrow nbsp, dot, comma. */
-const SEPARATOR = "[ \\u00A0\\u202F.,]";
-const AMOUNT = `\\d{1,3}(?:${SEPARATOR}\\d{3})*(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?`;
-const PRICE_NEAR_CURRENCY = new RegExp(`(?:(${AMOUNT})\\s*${CURRENCY})|(?:${CURRENCY}\\s*(${AMOUNT}))`, "i");
 
 /**
- * Rejects matches that are obviously not prices. Scanning the whole page for
- * "number next to a currency sign" used to label items with a copyright year
- * or a phone-number fragment.
+ * Plenty of Ukrainian shops still serve windows-1251. Decoding those bytes as
+ * UTF-8 turns every product name into "Íàóøíèêè" — the gift got added with a
+ * title of pure noise, and nothing downstream could tell it had gone wrong.
  */
-function plausiblePrice(raw: string): boolean {
-  const numeric = Number(
-    raw
-      .replace(/[\s\u00A0\u202F]/g, "")
-      .replace(/,(\d{1,2})$/, ".$1")
-      .replace(/[^\d.]/g, ""),
-  );
-  return Number.isFinite(numeric) && numeric > 0 && numeric < 100_000_000;
-}
+export function decodeHtml(bytes: Buffer, contentType = ""): string {
+  const fromHeader = /charset=["']?([\w-]+)/i.exec(contentType)?.[1];
+  // The meta tag is only readable once something has been decoded, and every
+  // encoding worth sniffing here agrees with latin1 on ASCII.
+  const head = bytes.subarray(0, 4096).toString("latin1");
+  const fromMeta =
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1] ??
+    /<meta[^>]+content=["'][^"']*charset=([\w-]+)/i.exec(head)?.[1];
 
-/** Structured data beats guessing: most shops ship a Product/Offer JSON-LD blob. */
-function priceFromJsonLd($: cheerio.CheerioAPI): string | null {
-  const nodes = $('script[type="application/ld+json"]').toArray();
-
-  for (const node of nodes) {
-    let parsed: unknown;
+  for (const label of [fromHeader, fromMeta, "utf-8"]) {
+    if (!label) continue;
     try {
-      parsed = JSON.parse($(node).text());
+      return new TextDecoder(label).decode(bytes);
     } catch {
-      continue;
-    }
-
-    const queue: unknown[] = [parsed];
-    while (queue.length > 0) {
-      const value = queue.shift();
-      if (Array.isArray(value)) {
-        queue.push(...value);
-        continue;
-      }
-      if (!value || typeof value !== "object") continue;
-
-      const record = value as Record<string, unknown>;
-      const offers = record.offers;
-      if (offers) queue.push(offers);
-
-      const price = record.price ?? record.lowPrice;
-      if (typeof price === "string" || typeof price === "number") {
-        const currency = typeof record.priceCurrency === "string" ? record.priceCurrency : "";
-        const text = `${price}`.trim();
-        if (plausiblePrice(text)) return currency ? `${text} ${currency}` : text;
-      }
-
-      for (const nested of Object.values(record)) {
-        if (nested && typeof nested === "object") queue.push(nested);
-      }
+      // Unknown label — try the next candidate.
     }
   }
+  return bytes.toString("utf-8");
+}
 
+// ── Структуровані дані ─────────────────────────────────────────────────────
+
+type Json = Record<string, unknown>;
+
+function firstString(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = firstString(entry);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Json;
+    // ImageObject, Brand and friends all keep the useful bit under one of these.
+    return firstString(record.url ?? record.name ?? record["@id"]);
+  }
   return null;
 }
 
+/** schema.org types, lowercased and stripped of their namespace URL. */
+function typesOf(node: Json): string[] {
+  const raw = node["@type"];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.split(/[/#]/).pop()!.toLowerCase());
+}
+
+/** Every object in a JSON-LD document, `@graph` and nesting included. */
+function flattenJsonLd(root: unknown): Json[] {
+  const out: Json[] = [];
+  const queue: unknown[] = [root];
+  // Shops have shipped documents that reference themselves; a seen-set keeps
+  // that from spinning forever.
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (!value || typeof value !== "object") continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      queue.push(...value);
+      continue;
+    }
+    out.push(value as Json);
+    queue.push(...Object.values(value as Json));
+  }
+  return out;
+}
+
+function readJsonLd($: cheerio.CheerioAPI): Json[] {
+  const nodes: Json[] = [];
+  for (const script of $('script[type="application/ld+json"]').toArray()) {
+    // Some CMSes wrap the payload in a CDATA section or HTML comments.
+    const raw = $(script)
+      .text()
+      .replace(/^\s*<!\[CDATA\[/, "")
+      .replace(/\]\]>\s*$/, "")
+      .trim();
+    if (!raw) continue;
+    try {
+      nodes.push(...flattenJsonLd(JSON.parse(raw)));
+    } catch {
+      // One malformed blob must not cost us the others.
+    }
+  }
+  return nodes;
+}
+
+/** The price of a single Offer / AggregateOffer node, if it states one. */
+function offerPrice(node: Json): ParsedPrice | null {
+  const currency = firstString(node.priceCurrency ?? node.priceCurrencyCode);
+  const specification = node.priceSpecification;
+  const rawPrice =
+    node.price ??
+    node.lowPrice ??
+    (specification && typeof specification === "object"
+      ? ((specification as Json).price ?? (specification as Json).lowPrice)
+      : undefined);
+
+  const text = firstString(rawPrice);
+  if (!text) return null;
+
+  // schema.org asks for "1234.56", but plenty of shops still ship "1 234,56 ₴"
+  // in this field, so it goes through the same reader as visible text.
+  const amount = parseAmount(text) ?? parsePrice(text)?.amount ?? null;
+  if (amount === null || !isPlausibleAmount(amount)) return null;
+
+  const iso = currency && /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : null;
+  return { amount, currency: iso ?? parsePrice(text)?.currency ?? null };
+}
+
+interface StructuredProduct {
+  title: string | null;
+  image: string | null;
+  price: ParsedPrice | null;
+  brand: string | null;
+  store: string | null;
+}
+
 /**
- * Best-effort OpenGraph/meta scraper. Many stores block bots or hide price
- * behind JS, so every field is optional — the caller falls back to manual
- * entry when title is missing.
+ * The product as its own page describes it. Offers are searched inside the
+ * Product node first — a page also carrying an Organization or a BreadcrumbList
+ * must not have its price read off some unrelated node.
+ */
+function fromJsonLd(nodes: Json[]): StructuredProduct {
+  const products = nodes.filter((node) => typesOf(node).includes("product"));
+  const product = products[0];
+
+  let price: ParsedPrice | null = null;
+  const offerNodes = product ? flattenJsonLd(product.offers) : [];
+  for (const offer of offerNodes.length > 0 ? offerNodes : nodes) {
+    const types = typesOf(offer);
+    // Without a Product to anchor to, only trust nodes that call themselves offers.
+    if (offerNodes.length === 0 && !types.some((type) => type.endsWith("offer"))) continue;
+    const candidate = offerPrice(offer);
+    if (!candidate) continue;
+    // Variants: the honest headline is what the gift can be had for.
+    if (!price || candidate.amount < price.amount) price = candidate;
+  }
+
+  const organisation = nodes.find((node) =>
+    typesOf(node).some((type) => type === "organization" || type === "onlinestore" || type === "website"),
+  );
+
+  return {
+    title: product ? firstString(product.name) : null,
+    image: product ? firstString(product.image) : null,
+    price,
+    brand: product ? firstString(product.brand) : null,
+    store: organisation ? firstString(organisation.name) : null,
+  };
+}
+
+/** The value an `itemprop` carries, which depends on the tag it sits on. */
+function microdataValue($: cheerio.CheerioAPI, element: AnyNode): string | null {
+  const $el = $(element);
+  const tag = "tagName" in element ? String(element.tagName).toLowerCase() : "";
+  if (tag === "meta") return $el.attr("content")?.trim() || null;
+  if (tag === "img") return $el.attr("src")?.trim() || null;
+  if (tag === "a" || tag === "link") return $el.attr("href")?.trim() || null;
+  return $el.attr("content")?.trim() || $el.text().trim() || null;
+}
+
+function fromMicrodata($: cheerio.CheerioAPI): StructuredProduct {
+  const scope = $('[itemtype*="schema.org/Product" i]').first();
+  const scoped = scope.length > 0;
+
+  const prop = (name: string): string | null => {
+    const selector = `[itemprop="${name}" i]`;
+    const element = (scoped ? scope.find(selector) : $(selector)).get(0);
+    return element ? microdataValue($, element) : null;
+  };
+
+  const amountText = prop("price");
+  const currency = prop("priceCurrency");
+  let price: ParsedPrice | null = null;
+  if (amountText) {
+    const amount = parseAmount(amountText) ?? parsePrice(amountText)?.amount ?? null;
+    if (amount !== null && isPlausibleAmount(amount)) {
+      price = {
+        amount,
+        currency:
+          currency && /^[A-Za-z]{3}$/.test(currency)
+            ? currency.toUpperCase()
+            : (parsePrice(amountText)?.currency ?? null),
+      };
+    }
+  }
+
+  return {
+    // Outside a Product scope an `itemprop="name"` is as likely to belong to
+    // the shop's own Organization markup as to the gift.
+    title: scoped ? prop("name") : null,
+    image: prop("image"),
+    price,
+    brand: prop("brand"),
+    store: null,
+  };
+}
+
+// ── Видимий DOM: остання надія ─────────────────────────────────────────────
+
+/** Nodes that advertise themselves as a price. */
+const PRICE_SELECTOR = [
+  '[itemprop="price"]',
+  '[class*="price" i]',
+  '[id*="price" i]',
+  '[data-testid*="price" i]',
+  '[data-qa*="price" i]',
+].join(", ");
+
+/** …and the ones that are a price the shop is no longer asking for. */
+const STALE_PRICE = /old|was|prev|before|strike|through|crossed|compare|discount|regular|list-price/i;
+/** Text that means the number belongs to something other than the gift. */
+const NOT_A_PRICE = /достав|шипинг|shipping|delivery|міс\.|\/міс|кредит|розстроч|бонус|cashback|кешбек|економія|знижк/i;
+
+function fromDom($: cheerio.CheerioAPI): ParsedPrice | null {
+  const candidates = $(PRICE_SELECTOR).toArray().slice(0, 40);
+
+  for (const element of candidates) {
+    const $el = $(element);
+
+    // A wrapper holding both the old and the new price reads as one run of
+    // text; the leaf that actually contains the number is the honest one.
+    if ($el.find(PRICE_SELECTOR).length > 0) continue;
+
+    const marker = `${$el.attr("class") ?? ""} ${$el.attr("id") ?? ""}`;
+    if (STALE_PRICE.test(marker)) continue;
+    if ($el.closest("del, s, strike").length > 0) continue;
+    if ($el.parents().toArray().some((parent) => STALE_PRICE.test($(parent).attr("class") ?? ""))) continue;
+
+    const text = $el.text().replace(/\s+/g, " ").trim();
+    if (!text || NOT_A_PRICE.test(text)) continue;
+
+    // A bare number in a "price-block" is as likely to be a rating or an item
+    // count, so down here the currency has to be spelled out.
+    const price = parsePrice(text, { requireCurrency: true });
+    if (price) return price;
+  }
+  return null;
+}
+
+// ── Назва ──────────────────────────────────────────────────────────────────
+
+/**
+ * Separators a shop glues its own name on with. A bare "-" is left alone —
+ * product codes are full of them ("WH-1000XM6") — but a spaced " - " is fair
+ * game. "ᐉ" and "•" are here because Ukrainian shops decorate titles with them
+ * by the thousand.
+ */
+const TITLE_SEPARATORS = "|·•●▪►▷ᐉ»—–";
+const TITLE_TAIL = new RegExp(
+  `\\s*[${TITLE_SEPARATORS}]\\s*[^${TITLE_SEPARATORS}]*$|\\s+-\\s+[^-]*$|\\s+::\\s*[^:]*$`,
+  "u",
+);
+/** Decoration and SEO verbs that lead a title and say nothing about the gift. */
+const TITLE_LEAD = new RegExp(`^[\\s${TITLE_SEPARATORS}★☆✅<>]+`, "u");
+const TITLE_LEAD_VERB = /^\s*(?:купити|купить|buy|замовити|заказать|придбати)\s+/iu;
+/**
+ * A tail is filler when it talks about the page rather than the thing: "ᐉ
+ * Сковорода Krauff • Краща ціна в Києві • Купити в Епіцентр" is three quarters
+ * noise, and all of it used to end up as the gift's name.
+ */
+const TITLE_SEO_TAIL =
+  /(?:купити|купить|придбати|замовити|заказать|ціна|цена|цены|ціни|відгуки|отзывы|характеристики|доставка|недорого|інтернет[- ]?магазин|интернет[- ]?магазин|офіційн|buy|price|reviews?|online|shop|store)/iu;
+
+/**
+ * Turns "Купити Навушники Sony WH-1000XM6 — інтернет-магазин ROZETKA" into
+ * "Навушники Sony WH-1000XM6". Only tails that name the shop are dropped, so a
+ * product whose name genuinely contains a dash keeps it.
+ */
+export function cleanTitle(raw: string, store: string | null, hostname: string): string {
+  let title = raw.replace(/\s+/g, " ").trim().replace(TITLE_LEAD, "");
+
+  const brandWords = [store, hostname.replace(/^www\./, "").split(".")[0]]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase())
+    .filter((value) => value.length >= 3);
+
+  // Several passes: "Навушники • Краща ціна • ROZETKA" is two tails deep, and
+  // the shop name is only the outer one.
+  for (let pass = 0; pass < 3; pass++) {
+    const tail = TITLE_TAIL.exec(title);
+    if (!tail) break;
+    const tailText = tail[0];
+    const namesShop = brandWords.some((word) => tailText.toLowerCase().includes(word));
+    if (!namesShop && !TITLE_SEO_TAIL.test(tailText)) break;
+    const stripped = title.slice(0, tail.index).trim();
+    // A page whose whole title is the shop name still needs a title.
+    if (!stripped) break;
+    title = stripped;
+  }
+
+  return title.replace(TITLE_LEAD_VERB, "").trim() || raw.trim();
+}
+
+/** Puts the maker in front when the name alone would not identify the gift. */
+function withBrand(title: string, brand: string | null): string {
+  if (!brand) return title;
+  const clean = brand.trim();
+  if (!clean || clean.length > 40) return title;
+  return title.toLowerCase().includes(clean.toLowerCase()) ? title : `${clean} ${title}`;
+}
+
+// ── Складання картки ───────────────────────────────────────────────────────
+
+/**
+ * Best-effort scraper. Many stores block bots or render the price with JS, so
+ * every field is optional — the caller asks the user for a name when the title
+ * is missing.
  */
 export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
+  const deadline = Date.now() + LOOKUP_BUDGET_MS;
+
   let fetched: { html: string; finalUrl: URL } | null;
   try {
-    fetched = await fetchHtml(url);
+    fetched = await fetchHtml(url, deadline);
   } catch (err) {
     console.warn("scrape: refused or failed to fetch", url, err instanceof Error ? err.message : err);
     return null;
   }
   if (!fetched) return null;
 
-  return parseLinkPreview(fetched.html, fetched.finalUrl);
+  // The rules supply facts, the model reads the page like a person and picks
+  // among those facts (ADR 0006). An empty card goes to the model too: a page
+  // with no markup at all is exactly where the rules have nothing to hold on to
+  // and the product is named in prose.
+  const parsed = parseLinkPreview(fetched.html, fetched.finalUrl) ?? emptyPreview(fetched.finalUrl);
+  const context = buildPageContext(fetched.html, fetched.finalUrl, parsed);
+  const suggestion = await suggestGiftCard(context, { timeoutMs: deadline - Date.now() });
+  const preview = applyGiftCard(parsed, suggestion, fetched.finalUrl.hostname);
+
+  return preview.title || preview.imageUrl || preview.price ? preview : null;
+}
+
+function emptyPreview(finalUrl: URL): LinkPreview {
+  return {
+    title: null,
+    imageUrl: null,
+    price: null,
+    priceAmount: null,
+    priceCurrency: null,
+    store: finalUrl.hostname.replace(/^www\./, ""),
+    description: null,
+  };
 }
 
 /** Split out from the fetch so the extraction rules can be exercised directly. */
@@ -244,56 +557,91 @@ export function parseLinkPreview(html: string, finalUrl: URL): LinkPreview | nul
   const $ = cheerio.load(html);
 
   const meta = (name: string) =>
-    $(`meta[property="${name}"]`).attr("content")?.trim() ||
-    $(`meta[name="${name}"]`).attr("content")?.trim() ||
+    $(`meta[property="${name}" i]`).attr("content")?.trim() ||
+    $(`meta[name="${name}" i]`).attr("content")?.trim() ||
     null;
 
-  const title = meta("og:title") ?? ($("title").first().text().trim() || null);
-  const store = meta("og:site_name") ?? finalUrl.hostname.replace(/^www\./, "");
+  const jsonLd = fromJsonLd(readJsonLd($));
+  const microdata = fromMicrodata($);
 
-  // og:image is routinely a site-relative path, which Telegram cannot fetch —
-  // the photo silently vanished from the card instead of just working.
-  const rawImage = meta("og:image") ?? meta("twitter:image");
-  let imageUrl: string | null = null;
-  if (rawImage) {
-    try {
-      const absolute = new URL(rawImage, finalUrl);
-      if (absolute.protocol === "http:" || absolute.protocol === "https:") {
-        imageUrl = absolute.toString();
-      }
-    } catch {
-      // Unparseable image URL — the card is fine without a picture.
-    }
-  }
+  const store =
+    meta("og:site_name") ?? jsonLd.store ?? finalUrl.hostname.replace(/^www\./, "");
 
-  const currency = meta("product:price:currency") ?? meta("og:price:currency");
-  const metaAmount =
-    meta("product:price:amount") ??
-    meta("og:price:amount") ??
-    $('[itemprop="price"]').attr("content")?.trim() ??
+  // Title, best source first. og:title is written for a social card and often
+  // carries the shop name; the structured name never does.
+  const rawTitle =
+    jsonLd.title ??
+    microdata.title ??
+    meta("og:title") ??
+    meta("twitter:title") ??
+    ($("h1").first().text().trim() || $("title").first().text().trim() || null);
+
+  const title = rawTitle
+    ? withBrand(cleanTitle(rawTitle, store, finalUrl.hostname), jsonLd.brand ?? microdata.brand)
+    : null;
+
+  const rawImage =
+    jsonLd.image ??
+    meta("og:image:secure_url") ??
+    meta("og:image") ??
+    meta("twitter:image") ??
+    microdata.image ??
+    $('link[rel="image_src"]').attr("href")?.trim() ??
     null;
+  const imageUrl = resolveImage(rawImage, finalUrl);
 
-  let price: string | null = null;
-  if (metaAmount && plausiblePrice(metaAmount)) {
-    price = currency ? `${metaAmount} ${currency}` : metaAmount;
-  }
-  price ??= priceFromJsonLd($);
-
-  if (!price) {
-    // Last resort, and deliberately narrow: only nodes that call themselves a
-    // price, never the whole document.
-    const candidates = $('[class*="price" i], [id*="price" i], [itemprop="price"]').slice(0, 20).toArray();
-    for (const node of candidates) {
-      const match = PRICE_NEAR_CURRENCY.exec($(node).text().replace(/\s+/g, " "));
-      const amount = match?.[1] ?? match?.[2];
-      if (match && amount && plausiblePrice(amount)) {
-        price = match[0].trim();
-        break;
-      }
-    }
-  }
+  // Meta price tags come from the same template as the visible price but
+  // without the struck-through neighbour, so they outrank the DOM.
+  const metaPrice = readMetaPrice(meta);
+  const price = jsonLd.price ?? microdata.price ?? metaPrice ?? fromDom($);
 
   if (!title && !imageUrl && !price) return null;
 
-  return { title, imageUrl, price, store };
+  return {
+    title,
+    imageUrl,
+    price: price ? formatPrice(price) : null,
+    priceAmount: price?.amount ?? null,
+    priceCurrency: price?.currency ?? null,
+    store,
+    // Markup has no place for the sentence a guest actually wants; only the
+    // model fills this, in fetchLinkPreview.
+    description: null,
+  };
+}
+
+function readMetaPrice(meta: (name: string) => string | null): ParsedPrice | null {
+  const amountText =
+    meta("product:price:amount") ??
+    meta("og:price:amount") ??
+    meta("product:price") ??
+    meta("twitter:data1");
+  if (!amountText) return null;
+
+  const amount = parseAmount(amountText) ?? parsePrice(amountText)?.amount ?? null;
+  if (amount === null || !isPlausibleAmount(amount)) return null;
+
+  const currencyText = meta("product:price:currency") ?? meta("og:price:currency");
+  const iso = currencyText && /^[A-Za-z]{3}$/.test(currencyText.trim())
+    ? currencyText.trim().toUpperCase()
+    : null;
+
+  return { amount, currency: iso ?? parsePrice(amountText)?.currency ?? null };
+}
+
+/**
+ * og:image is routinely a site-relative path, which Telegram cannot fetch —
+ * the photo silently vanished from the card instead of just working. SVG and
+ * data URIs go the same way, so they are dropped rather than shown broken.
+ */
+function resolveImage(raw: string | null, finalUrl: URL): string | null {
+  if (!raw) return null;
+  try {
+    const absolute = new URL(raw, finalUrl);
+    if (absolute.protocol !== "http:" && absolute.protocol !== "https:") return null;
+    if (/\.svgz?($|\?)/i.test(absolute.pathname)) return null;
+    return absolute.toString();
+  } catch {
+    return null;
+  }
 }

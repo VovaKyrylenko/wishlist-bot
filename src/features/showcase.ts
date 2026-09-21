@@ -20,11 +20,16 @@ import {
   formatGuestName,
   formatOwnerName,
   formatRelativeDate,
+  isHttpUrl,
   PRIORITY_ICON,
   PRIORITY_ORDER,
 } from "../lib/format.js";
 import { buildListDeepLink } from "../lib/deeplink.js";
-import { notifyOwnerNewPromise } from "../lib/notify.js";
+import {
+  notifyOwnerNewPromise,
+  notifyOwnerPromiseReleased,
+  notifyWatchersGiftFreeAgain,
+} from "../lib/notify.js";
 import {
   ack,
   addIndexButtons,
@@ -36,6 +41,8 @@ import {
   truncate,
 } from "../lib/screen.js";
 import { listIcon, renderHome, type ScreenOptions } from "./home.js";
+import { renderList } from "./lists.js";
+import { renderGift } from "./gifts.js";
 import { t } from "../text.js";
 
 const GIFTS_PER_PAGE = 8;
@@ -86,7 +93,7 @@ export async function renderShowcase(
 ) {
   const wishlist = await prisma.wishlist.findUnique({
     where: { id: wishlistId },
-    include: { owner: true },
+    include: { owner: true, editors: true },
   });
   if (!wishlist) {
     await renderHome(ctx, 0, { notice: t.common.linkDead });
@@ -94,6 +101,16 @@ export async function renderShowcase(
   }
 
   const user = await currentUser(ctx);
+
+  // The showcase is for guests only. The owner opening their own share link —
+  // or a co-author, who is on the owner's side of the surprise — would see
+  // exactly the per-gift "вже дарують" marks the contract (§8.4) hides from
+  // them, so they land on their own list screen instead.
+  if (wishlist.ownerId === user.id || wishlist.editors.some((e) => e.userId === user.id)) {
+    await renderList(ctx, wishlistId, 0, options);
+    return;
+  }
+
   await rememberVisit(wishlistId, wishlist.ownerId, user.id);
 
   const [gifts, watching] = await Promise.all([
@@ -220,12 +237,22 @@ async function renderShowcaseGift(
   const gift = await prisma.wishlistItem.findUnique({
     where: { id: giftId },
     include: {
-      wishlist: { include: { owner: true } },
+      wishlist: { include: { owner: true, editors: true } },
       reservations: { where: holdingReservations },
     },
   });
   if (!gift || gift.status !== "ACTIVE") {
     await renderHome(ctx, 0, { notice: t.common.giftGone });
+    return;
+  }
+
+  // Same rule as the showcase itself: owners and co-authors get their own gift
+  // screen, which already knows what the surprise allows them to see.
+  if (
+    gift.wishlist.ownerId === user.id ||
+    gift.wishlist.editors.some((e) => e.userId === user.id)
+  ) {
+    await renderGift(ctx, giftId, 0, options);
     return;
   }
 
@@ -235,7 +262,7 @@ async function renderShowcaseGift(
   const back = `g:open:${gift.wishlistId}:${FILTER_CODE[filter]}:${page}`;
 
   const kb = new InlineKeyboard();
-  if (gift.url) kb.url(t.buttons.whereToBuy, gift.url).row();
+  if (gift.url && isHttpUrl(gift.url)) kb.url(t.buttons.whereToBuy, gift.url).row();
 
   if (mine) {
     kb.text(t.buttons.imGifting, `res:open:${mine.id}`).row();
@@ -286,14 +313,19 @@ async function promiseGift(ctx: MyContext, giftId: string, filter: TakenFilter, 
   const user = await currentUser(ctx);
   const gift = await prisma.wishlistItem.findUnique({
     where: { id: giftId },
-    include: { wishlist: { include: { owner: true } } },
+    include: { wishlist: { include: { owner: true, editors: true } } },
   });
   if (!gift || gift.status !== "ACTIVE") {
     await renderHome(ctx, 0, { notice: t.common.giftGone });
     return;
   }
-  if (gift.wishlist.ownerId === user.id) {
-    await renderShowcase(ctx, gift.wishlistId, filter, page, { notice: t.showcase.promiseOwnList });
+  // Owners and co-authors are the list's insiders — promising a gift there
+  // would only create a phantom that hides it from real guests.
+  if (
+    gift.wishlist.ownerId === user.id ||
+    gift.wishlist.editors.some((e) => e.userId === user.id)
+  ) {
+    await renderList(ctx, gift.wishlistId, 0, { notice: t.showcase.promiseOwnList });
     return;
   }
   if (gift.wishlist.status === "ARCHIVED") {
@@ -396,17 +428,72 @@ export function registerShowcase(bot: Bot<MyContext>) {
 
   bot.callbackQuery(/^g:undo:([^:]+):([avr]):(\d+)$/, async (ctx) => {
     const user = await currentUser(ctx);
+    const filter = FILTER_BY_CODE[ctx.match[2]];
+    const page = Number(ctx.match[3]);
     const reservation = await prisma.reservation.findUnique({
       where: { id: ctx.match[1] },
-      include: { item: true },
+      include: {
+        item: {
+          include: {
+            wishlist: { include: { owner: true } },
+            reservations: { where: holdingReservations },
+          },
+        },
+      },
     });
     if (!reservation || reservation.guestId !== user.id) {
       await renderHome(ctx, 0);
       return;
     }
-    await prisma.reservation.update({ where: { id: reservation.id }, data: { status: "CANCELLED" } });
-    await renderShowcase(ctx, reservation.item.wishlistId, FILTER_BY_CODE[ctx.match[2]], Number(ctx.match[3]), {
-      notice: t.showcase.promiseUndone(escapeHtml(truncate(reservation.item.title, 60))),
+
+    const { item } = reservation;
+    const title = escapeHtml(truncate(item.title, 60));
+
+    // Old success screens keep working by design, so this button can arrive
+    // long after the promise changed state — never blindly cancel it.
+    if (reservation.status === "PURCHASED") {
+      await renderShowcase(ctx, item.wishlistId, filter, page, {
+        notice: t.showcase.promiseUndoBought(title),
+      });
+      return;
+    }
+    if (reservation.status !== "ACTIVE") {
+      await renderShowcase(ctx, item.wishlistId, filter, page, {
+        notice: t.showcase.promiseUndoGone,
+      });
+      return;
+    }
+
+    const wasFull = computeAvailability(item.quantity, item.reservations).available === 0;
+
+    // «Передумав» undoes one tap — one unit — not the whole promise: a guest
+    // who took one earlier and just added «+1 ще» is backing out of the +1,
+    // not of everything.
+    const remaining = reservation.quantity - 1;
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: remaining > 0 ? { quantity: remaining } : { status: "CANCELLED" },
+    });
+
+    // The owner heard «друзі обрали подарунок» moments ago; without this the
+    // undo leaves them counting a promise that no longer exists.
+    if (item.wishlist.notifyOwner) {
+      await notifyOwnerPromiseReleased(ctx.api, {
+        ownerTelegramId: item.wishlist.owner.telegramId,
+        wishlistTitle: item.wishlist.title,
+        giftTitle: item.title,
+        privacyMode: item.wishlist.privacyMode,
+      });
+    }
+    if (wasFull && item.status === "ACTIVE" && item.wishlist.status === "ACTIVE") {
+      await notifyWatchersGiftFreeAgain(ctx.api, item.wishlistId, item.wishlist.title, item.title);
+    }
+
+    await renderShowcase(ctx, item.wishlistId, filter, page, {
+      notice:
+        remaining > 0
+          ? t.showcase.promiseUndoneOne(title, remaining)
+          : t.showcase.promiseUndone(title),
     });
   });
 
@@ -414,9 +501,18 @@ export function registerShowcase(bot: Bot<MyContext>) {
   bot.callbackQuery(/^sub:([^:]+):([avr]):(\d+)$/, async (ctx) => {
     const user = await currentUser(ctx);
     const wishlistId = ctx.match[1];
-    const wishlist = await prisma.wishlist.findUnique({ where: { id: wishlistId } });
+    const wishlist = await prisma.wishlist.findUnique({
+      where: { id: wishlistId },
+      include: { editors: true },
+    });
     if (!wishlist) {
       await renderHome(ctx, 0, { notice: t.common.listGone });
+      return;
+    }
+    // An old button can offer the owner a follow on their own list; following
+    // yourself only produces digests about your own edits.
+    if (wishlist.ownerId === user.id || wishlist.editors.some((e) => e.userId === user.id)) {
+      await renderList(ctx, wishlistId, 0);
       return;
     }
     await prisma.subscription.upsert({

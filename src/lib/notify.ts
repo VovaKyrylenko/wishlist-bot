@@ -43,29 +43,35 @@ function isPermanentlyUnreachable(err: unknown): boolean {
 
 /**
  * Someone who blocked the bot must stop receiving fan-outs, or every future
- * digest wastes a request on them forever. Their lists and promises stay
- * untouched — only the push channels are dropped.
+ * digest wastes a request on them forever. Only the push channel is dropped:
+ * lists, promises and the visit history behind «Списки друзів» stay — a person
+ * who unblocks the bot next month still deserves to find their way back.
  */
 async function forgetUnreachable(telegramId: string): Promise<void> {
   try {
     const user = await prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
     if (!user) return;
-    await prisma.$transaction([
-      prisma.subscription.deleteMany({ where: { userId: user.id } }),
-      prisma.wishlistVisit.deleteMany({ where: { userId: user.id } }),
-    ]);
+    await prisma.subscription.deleteMany({ where: { userId: user.id } });
   } catch (err) {
     console.error(`notify: failed to prune unreachable user ${telegramId}:`, err);
   }
 }
 
-/** Best-effort DM. Returns false when the message could not be delivered. */
+/**
+ * How a DM attempt ended. "unreachable" is final (the chat is gone and its
+ * subscriptions were dropped); "failed" is transient — a timeout, a 429 — and
+ * the caller may retry later, which is exactly what the digest cron does with
+ * its watermark.
+ */
+export type SendResult = "delivered" | "unreachable" | "failed";
+
+/** Best-effort DM. */
 export async function safeSend(
   api: BotApi,
   telegramId: string,
   text: string,
   keyboard?: InlineKeyboard,
-): Promise<boolean> {
+): Promise<SendResult> {
   await pace();
   try {
     await api.sendMessage(Number(telegramId), truncateHtml(text, TEXT_LIMIT), {
@@ -73,14 +79,14 @@ export async function safeSend(
       reply_markup: keyboard,
       link_preview_options: { is_disabled: true },
     });
-    return true;
+    return "delivered";
   } catch (err) {
     if (isPermanentlyUnreachable(err)) {
       await forgetUnreachable(telegramId);
-      return false;
+      return "unreachable";
     }
     console.error(`notify: failed to message ${telegramId}:`, err);
-    return false;
+    return "failed";
   }
 }
 
@@ -149,6 +155,31 @@ export async function notifyOwnerGiftBought(
     opts.privacyMode === "SURPRISE"
       ? t.notify.ownerBoughtSurprise(list)
       : t.notify.ownerBoughtOpen(list, escapeHtml(opts.giftTitle), escapeHtml(opts.guestName)),
+  );
+}
+
+/**
+ * Undoing «куплено» changes what the owner was already told, so the owner
+ * hears about it too — otherwise their picture of the list quietly drifts from
+ * reality, which is exactly what the confirmation dialog warns about.
+ */
+export async function notifyOwnerBoughtUndone(
+  api: BotApi,
+  opts: {
+    ownerTelegramId: string;
+    wishlistTitle: string;
+    giftTitle: string;
+    privacyMode: PrivacyMode;
+    guestName: string;
+  },
+) {
+  const list = escapeHtml(opts.wishlistTitle);
+  await safeSend(
+    api,
+    opts.ownerTelegramId,
+    opts.privacyMode === "SURPRISE"
+      ? t.notify.ownerUnboughtSurprise(list)
+      : t.notify.ownerUnboughtOpen(list, escapeHtml(opts.giftTitle), escapeHtml(opts.guestName)),
   );
 }
 

@@ -26,6 +26,7 @@ import {
 import { isPast, parseEventDate } from "../lib/dates.js";
 import { clearPending, type Pending } from "../lib/pending.js";
 import { ask } from "../lib/prompt.js";
+import { getDraft, hasContent, updateDraft } from "../lib/drafts.js";
 import { notifyGuestListFinished, notifyGuestListDeleted, notifyOwnerCoAuthorJoined } from "../lib/notify.js";
 import {
   ack,
@@ -206,6 +207,28 @@ async function createList(ctx: MyContext, title: string) {
     data: { title: truncate(title, 80), slug: generateSlug(), ownerId: user.id },
   });
   await clearPending(ctx, user.id);
+
+  // F3 — the gift someone pasted before they had any list rides straight into
+  // the one they just created, instead of sitting orphaned in a draft until
+  // the next plain message happens to surface it.
+  const draft = await getDraft(user.id);
+  if (draft && !draft.wishlistId && hasContent(draft)) {
+    // Dynamic import: gifts.ts already imports renderList from this module.
+    const { renderDraft, startGiftFromInput } = await import("./gifts.js");
+    if (!draft.title && draft.url) {
+      // The link was stored unscraped — run it through the normal preview path.
+      await startGiftFromInput(ctx, { url: draft.url }, wishlist.id);
+      return;
+    }
+    await updateDraft(user.id, { wishlistId: wishlist.id });
+    if (!draft.title && draft.imageUrl) {
+      await ask(ctx, "draft.title", { text: t.gift.askPhotoTitle, back: "dr:cancel" });
+      return;
+    }
+    await renderDraft(ctx, { notice: t.list.created(escapeHtml(wishlist.title)) });
+    return;
+  }
+
   await renderList(ctx, wishlist.id, 0, {
     notice: t.list.created(escapeHtml(wishlist.title)),
   });
@@ -816,6 +839,8 @@ export function registerLists(bot: Bot<MyContext>) {
             url: g.url,
             imageUrl: g.imageUrl,
             price: g.price,
+            priceAmount: g.priceAmount,
+            priceCurrency: g.priceCurrency,
             store: g.store,
             comment: g.comment,
             priority: g.priority,

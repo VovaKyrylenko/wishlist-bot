@@ -74,13 +74,13 @@ model Wishlist {
   updatedAt   DateTime       @updatedAt
 
   /// Owner can mute per-reservation pings without losing the list itself.
-  notifyOwner Boolean @default(true)
+  notifyOwner       Boolean   @default(true)
   /// Single-use secret behind the "invite a co-author" deep link; null when no
   /// invite is open.
-  editorInviteToken String? @unique
+  editorInviteToken String?   @unique
   /// Set once the pre-event reminder for the current `eventDate` has gone out,
   /// so the cron never sends it twice. Cleared whenever `eventDate` changes.
-  reminderSentAt DateTime?
+  reminderSentAt    DateTime?
 
   ownerId String
   owner   User   @relation("OwnedWishlists", fields: [ownerId], references: [id], onDelete: Cascade)
@@ -120,21 +120,28 @@ enum ItemStatus {
 }
 
 model WishlistItem {
-  id           String     @id @default(cuid())
-  wishlistId   String
-  wishlist     Wishlist   @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
-  title        String
-  url          String?
-  imageUrl     String?
-  price        String?
-  store        String?
-  comment      String?
-  priority     Priority   @default(NORMAL)
-  quantity     Int        @default(1)
-  sortOrder    Int        @default(0)
-  status       ItemStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  wishlistId    String
+  wishlist      Wishlist   @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  title         String
+  url           String?
+  imageUrl      String?
+  /// Whatever the shop or the owner wrote, verbatim — "від 2 000 грн" included.
+  /// Always the source of truth for display.
+  price         String?
+  /// Set only when `price` was itself a clean number ("12 999 ₴", "24,90 €") —
+  /// see src/lib/price.ts. Lets a future screen sort or filter by price
+  /// without having to re-parse the display string every time.
+  priceAmount   Float?
+  priceCurrency String?
+  store         String?
+  comment       String?
+  priority      Priority   @default(NORMAL)
+  quantity      Int        @default(1)
+  sortOrder     Int        @default(0)
+  status        ItemStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   /// When the gift was removed, so "↩️ Повернути" can offer itself for a few
   /// minutes and then quietly stop.
@@ -152,12 +159,12 @@ enum ReservationStatus {
 }
 
 model Reservation {
-  id            String            @id @default(cuid())
-  itemId        String
-  item          WishlistItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  guestId       String
-  guest         User              @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  quantity      Int
+  id              String            @id @default(cuid())
+  itemId          String
+  item            WishlistItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  guestId         String
+  guest           User              @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  quantity        Int
   /// Who the guest was at the moment of promising — shown to the owner only
   /// when the surprise is switched off. Name and @username; no phone number.
   contactSnapshot String?
@@ -223,14 +230,18 @@ model Draft {
   wishlistId String?
   wishlist   Wishlist? @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
 
-  title    String?
-  url      String?
-  imageUrl String?
-  price    String?
-  store    String?
-  comment  String?
-  quantity Int      @default(1)
-  priority Priority @default(NORMAL)
+  title         String?
+  url           String?
+  imageUrl      String?
+  /// See WishlistItem.price — same rule, carried over verbatim when the
+  /// draft is saved.
+  price         String?
+  priceAmount   Float?
+  priceCurrency String?
+  store         String?
+  comment       String?
+  quantity      Int      @default(1)
+  priority      Priority @default(NORMAL)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

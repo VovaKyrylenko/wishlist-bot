@@ -35,7 +35,14 @@ async function resolve(ctx: Context): Promise<CurrentUser> {
 
   const existing = await prisma.user.findUnique({ where: { telegramId } });
   if (!existing) {
-    const created = await prisma.user.create({ data: { telegramId, ...profile } });
+    // Upsert, not create: two first-ever messages can race each other through
+    // the webhook, and the loser of a plain create would crash on the unique
+    // telegramId instead of just becoming the same user.
+    const created = await prisma.user.upsert({
+      where: { telegramId },
+      create: { telegramId, ...profile },
+      update: { ...profile },
+    });
     return { ...created, previousSeenAt: created.lastSeenAt };
   }
 
