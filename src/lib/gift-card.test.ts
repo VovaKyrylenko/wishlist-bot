@@ -26,9 +26,13 @@ const plain = (text: string | null | undefined) => text?.replace(/[   ]/g, 
 const noContext = (over: Partial<PageContext> = {}): PageContext => ({
   prompt: "",
   images: [],
-  amounts: [],
+  prices: [],
   ...over,
 });
+
+/** The prices a page states, in the shape buildPageContext collects them. */
+const onPage = (...prices: [number, string | null][]) =>
+  prices.map(([amount, currency]) => ({ amount, currency }));
 
 describe("applyGiftCard — the model names the gift", () => {
   it("replaces a home-page title with the product", () => {
@@ -132,7 +136,10 @@ describe("applyGiftCard — the model fills the rest of the card", () => {
 });
 
 describe("readAnswer — the answer is checked against the page it read", () => {
-  const context = noContext({ amounts: [9499, 8999, 375], images: ["https://cdn.shop.ua/a.jpg", "https://cdn.shop.ua/b.jpg"] });
+  const context = noContext({
+    prices: onPage([9499, "UAH"], [8999, "UAH"], [375, "UAH"]),
+    images: ["https://cdn.shop.ua/a.jpg", "https://cdn.shop.ua/b.jpg"],
+  });
 
   it("accepts a price the page actually states", () => {
     const answer = readAnswer('{"name":"Планшет","price":"8999","currency":"UAH","description":null,"image":null}', context);
@@ -147,6 +154,19 @@ describe("readAnswer — the answer is checked against the page it read", () => 
     expect(answer?.price).toBeNull();
   });
 
+  it("keeps the page's currency when the model answers with another one", () => {
+    // The amount is real, the currency is not: 8 999 ₴ must never become 8 999 $.
+    const answer = readAnswer('{"name":"Планшет","price":"8999","currency":"USD","description":null,"image":null}', context);
+    expect(answer?.price?.currency).toBe("UAH");
+    expect(plain(answer?.price?.text)).toBe("8 999 ₴");
+  });
+
+  it("accepts a foreign currency the page itself uses", () => {
+    const dollars = noContext({ prices: onPage([104, "USD"], [99, "UAH"]) });
+    const answer = readAnswer('{"name":"Sneakers","price":"104","currency":"USD","description":null,"image":null}', dollars);
+    expect(answer?.price?.currency).toBe("USD");
+  });
+
   it("takes the photo by index from the list it was shown", () => {
     expect(readAnswer('{"name":"A","price":null,"currency":null,"description":null,"image":1}', context)?.imageUrl).toBe(
       "https://cdn.shop.ua/b.jpg",
@@ -156,7 +176,8 @@ describe("readAnswer — the answer is checked against the page it read", () => 
   it.each([
     ["an index past the end", '{"name":"A","price":null,"currency":null,"description":null,"image":9}'],
     ["a negative index", '{"name":"A","price":null,"currency":null,"description":null,"image":-1}'],
-    ["a URL instead of an index", '{"name":"A","price":null,"currency":null,"description":null,"image":null}'],
+    ["a URL instead of an index", '{"name":"A","price":null,"currency":null,"description":null,"image":"https://cdn.shop.ua/evil.jpg"}'],
+    ["a fractional index", '{"name":"A","price":null,"currency":null,"description":null,"image":1.5}'],
   ])("drops %s", (_case, answer) => {
     expect(readAnswer(answer, context)?.imageUrl).toBeNull();
   });
@@ -233,10 +254,40 @@ describe("buildPageContext", () => {
   const context = buildPageContext(html, new URL("https://allo.ua/p/1"), null);
 
   it("offers every price on the page as a candidate, with its surroundings", () => {
-    expect(context.amounts).toContain(8999);
-    expect(context.amounts).toContain(9499);
-    expect(context.amounts).toContain(375);
+    expect(context.prices).toContainEqual({ amount: 8999, currency: "UAH" });
+    expect(context.prices).toContainEqual({ amount: 9499, currency: "UAH" });
+    expect(context.prices).toContainEqual({ amount: 375, currency: "UAH" });
     expect(context.prompt).toContain("₴/міс");
+  });
+
+  it("sees a price written with the symbol in front", () => {
+    const dollars = buildPageContext(
+      `<html><body><h1>Sneakers</h1><div>$104.00</div><div>Доставка 99 грн</div></body></html>`,
+      new URL("https://shop.ua/p/1"),
+      null,
+    );
+    expect(dollars.prices).toContainEqual({ amount: 104, currency: "USD" });
+  });
+
+  it("decodes the entities a shop writes instead of characters", () => {
+    const entities = buildPageContext(
+      `<html><body><h1>Ка&#39;ва &laquo;Ефіопія&raquo;</h1><div>1&nbsp;250&nbsp;грн</div></body></html>`,
+      new URL("https://shop.ua/p/1"),
+      null,
+    );
+    expect(entities.prompt).toContain("Ка'ва «Ефіопія»");
+    expect(entities.prices).toContainEqual({ amount: 1250, currency: "UAH" });
+  });
+
+  it("sends the whole page text, including what lives inside <header>", () => {
+    const wordpress = buildPageContext(
+      `<html><body><header class="entry-header"><h1>Кейп з тканини букле</h1></header>
+        <p>Оверсайз, універсальний розмір.</p><footer>© 2026</footer></body></html>`,
+      new URL("https://shop.ua/p/1"),
+      null,
+    );
+    expect(wordpress.prompt).toContain("Кейп з тканини букле");
+    expect(wordpress.prompt).toContain("універсальний розмір");
   });
 
   it("offers images but not thumbnails, scripts or styles", () => {
@@ -246,9 +297,9 @@ describe("buildPageContext", () => {
     expect(context.prompt).not.toContain("color:red");
   });
 
-  it("sends the text around the product, not the navigation", () => {
+  it("sends the product text and drops only the machinery", () => {
     expect(context.prompt).toContain("11-дюймовим");
-    expect(context.prompt).not.toContain("Кошик Акції");
+    expect(context.prompt).not.toContain("Купи зараз");
   });
 
   it("passes the markup's own facts through as facts", () => {
@@ -259,7 +310,7 @@ describe("buildPageContext", () => {
 });
 
 describe("suggestGiftCard", () => {
-  const context = noContext({ prompt: "Текст сторінки: Кейп з тканини букле", amounts: [2400] });
+  const context = noContext({ prompt: "Текст сторінки: Кейп з тканини букле", prices: onPage([2400, "UAH"]) });
 
   it("makes no request at all when no key is configured", async () => {
     const key = process.env.AI_GATEWAY_API_KEY;
@@ -272,6 +323,17 @@ describe("suggestGiftCard", () => {
     fetchSpy.mockRestore();
     if (key === undefined) delete process.env.AI_GATEWAY_API_KEY;
     else process.env.AI_GATEWAY_API_KEY = key;
+  });
+
+  it("does not spend a call when the lookup has no time left", async () => {
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(suggestGiftCard(context, { timeoutMs: 200 })).resolves.toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
+    delete process.env.AI_GATEWAY_API_KEY;
   });
 
   it("returns nothing when the gateway fails, so the lookup falls back", async () => {

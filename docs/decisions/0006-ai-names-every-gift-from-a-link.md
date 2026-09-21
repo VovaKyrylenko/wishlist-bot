@@ -35,10 +35,12 @@ today's price, one or two sentences of description, and which photo is the produ
   (`src/lib/gift-card.ts`) gives it: the markup facts; every price on the page with the words
   around it (so it can tell `3 999 ₴` struck through from `2 222 ₴` today and from
   `222 ₴/міс` in credit); up to ten images that are not thumbnails, the markup's own image
-  first; and the page text **around the `<h1>`**, not the first N characters of the body.
+  first; and **the whole visible text of the page**, capped at 60 000 characters.
 - **The code checks the answer.** A price is accepted only if that amount appears among the
   amounts the page itself states, and only through `parsePrice`/`isPlausibleAmount`/`formatPrice`.
-  A photo is accepted only as an index into the list we showed. The name is cut to
+  A photo is accepted only as an index into the list we showed. The currency is taken from the
+  page whenever the page wrote a different one next to that amount, so a page priced in ₴ can
+  never become a card priced in `$`. The name is cut to
   `MAX_TITLE_LENGTH`; the description is stripped of hashtags and emoji, cut to 300 characters
   at a sentence end, and dropped if it is too short to be a sentence.
 - **The description becomes the gift's comment** on the draft screen, where the owner can
@@ -48,6 +50,9 @@ today's price, one or two sentences of description, and which photo is the produ
   authenticated with `AI_GATEWAY_API_KEY` — the same client shape and secret as
   `scripts/release/notes.ts` (ADR 0001). No new runtime dependency.
 - Page text is passed as data inside a delimiter, with a system instruction saying it is data.
+- **One budget covers the whole lookup.** `fetchLinkPreview` sets an 8 s deadline; every
+  redirect hop and the model call share what is left of it, and the model is skipped rather
+  than called with under a second to spare.
 - When the model is slow, fails, or no key is configured, the card is the rule-based one —
   except when its title is a generic page name, the shop name or a social wrapper, where the
   user is asked to type a name instead. The whole lookup stays inside the existing 8 s budget.
@@ -59,6 +64,12 @@ today's price, one or two sentences of description, and which photo is the produ
   the pages where it exists the page still shows an old price, a credit instalment and a
   neighbour's price — deciding between those is reading, which is what the model is for. The
   check against the page's own amounts keeps the safety that rule gave.
+- **Send a window of text around the `<h1>` instead of the whole page.** Cheaper (~4 000
+  tokens against ~13 000) and the first implementation of this decision. It needs an anchor,
+  and every anchor broke on real markup: a multi-line `<h1>` does not match the
+  whitespace-collapsed text, and themes that wrap the title in `<header>` lose it completely —
+  both verified. Falling back to "the first N characters" put us back in the failure below.
+  The whole text answered identically on every page measured, so the complexity bought nothing.
 - **Give the model the page text and trust its answer.** Measured and rejected: fed the first
   12 000 characters of a live Allo page, `gemini-3.5-flash-lite` and `gpt-5.4-mini` both
   returned `6 999 ₴` for a tablet that costs `8 999 ₴` — a number printed nowhere on the page.
@@ -87,8 +98,8 @@ today's price, one or two sentences of description, and which photo is the produ
 
 - Gift names stop being a lottery of what a shop happens to put in `<title>`, which is what
   makes a shared list readable by someone who did not paste the link.
-- Every link now costs a model call (~4 000 input tokens on a real page, ~$0.0015) and about
-  two seconds end to end. The 3 s "shop is slow" notice absorbs it; the budget's headroom
+- Every link now costs a model call (~13 000 input tokens on a real page, ~$0.004) and about
+  two seconds end to end — the model itself answers in ~1.2 s even on a 35 KB prompt. The 3 s "shop is slow" notice absorbs it; the budget's headroom
   shrinks. At 500 links a month that is well under a dollar.
 - Gifts arrive with a description the owner did not write. It lands in the comment, which is
   visible and editable on the draft screen before saving — but a guest will read whatever the
@@ -115,8 +126,11 @@ today's price, one or two sentences of description, and which photo is the produ
 - [ ] The four real failures from issue #16 are asserted and each yields a recognisable product
       name; pages with clean markup keep the names they have today.
       check: `pnpm test` (`src/lib/gift-card.test.ts`) and `pnpm run verify:scrape`
-- [ ] A price the page does not state is dropped, and a photo index outside the offered list is
-      dropped.
+- [ ] A price the page does not state is dropped, a photo index outside the offered list is
+      dropped, and a currency the page did not write next to that amount is replaced by the
+      page's own.
+      check: `pnpm test`
+- [ ] The whole lookup, fetch plus model, stays inside one 8 s budget.
       check: `pnpm test`
 - [ ] With no `AI_GATEWAY_API_KEY` set, link lookup still works and no request is made; a gateway
       failure leaves the user with the rule-based card.

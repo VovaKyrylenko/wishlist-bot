@@ -31,7 +31,12 @@ export interface LinkPreview {
   description: string | null;
 }
 
-const REQUEST_TIMEOUT_MS = 8000;
+/**
+ * One budget for the whole lookup, not per step: the fetch used to get 8 s on
+ * *every* redirect hop, and the model's 5 s sat on top of that, so a slow shop
+ * could hold the "🔎 Дивлюся, що там…" screen for half a minute.
+ */
+const LOOKUP_BUDGET_MS = 8000;
 const MAX_REDIRECTS = 3;
 /** Plenty for a `<head>`; a product page that needs more is not worth the memory. */
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -126,15 +131,18 @@ async function assertPublicUrl(url: URL): Promise<void> {
  * "follow"` would happily land on a public URL that bounces to
  * 169.254.169.254.
  */
-async function fetchHtml(startUrl: string): Promise<{ html: string; finalUrl: URL } | null> {
+async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: string; finalUrl: URL } | null> {
   let current = new URL(startUrl);
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     await assertPublicUrl(current);
 
+    const left = deadline - Date.now();
+    if (left <= 0) return null;
+
     const res = await fetch(current, {
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(left),
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; WishlistBot/1.0; +https://t.me)",
         Accept: "text/html,application/xhtml+xml",
@@ -509,9 +517,11 @@ function withBrand(title: string, brand: string | null): string {
  * is missing.
  */
 export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
+  const deadline = Date.now() + LOOKUP_BUDGET_MS;
+
   let fetched: { html: string; finalUrl: URL } | null;
   try {
-    fetched = await fetchHtml(url);
+    fetched = await fetchHtml(url, deadline);
   } catch (err) {
     console.warn("scrape: refused or failed to fetch", url, err instanceof Error ? err.message : err);
     return null;
@@ -524,7 +534,7 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
   // and the product is named in prose.
   const parsed = parseLinkPreview(fetched.html, fetched.finalUrl) ?? emptyPreview(fetched.finalUrl);
   const context = buildPageContext(fetched.html, fetched.finalUrl, parsed);
-  const suggestion = await suggestGiftCard(context);
+  const suggestion = await suggestGiftCard(context, { timeoutMs: deadline - Date.now() });
   const preview = applyGiftCard(parsed, suggestion, fetched.finalUrl.hostname);
 
   return preview.title || preview.imageUrl || preview.price ? preview : null;

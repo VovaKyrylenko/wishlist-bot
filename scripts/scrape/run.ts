@@ -387,7 +387,14 @@ group("картка від моделі: сторінки, де розмітка
 // 14. Що модель може змінити в картці, а що лишається з розмітки.
 group("картка від моделі: межі довіри");
 {
-  const page: PageContext = { prompt: "", images: ["https://cdn.shop.ua/tablet.jpg"], amounts: [9499, 8999] };
+  const page: PageContext = {
+    prompt: "",
+    images: ["https://cdn.shop.ua/tablet.jpg"],
+    prices: [
+      { amount: 9499, currency: "UAH" },
+      { amount: 8999, currency: "UAH" },
+    ],
+  };
 
   // Стара ціна поруч із новою: модель читає сторінку як людина й бере ту, за
   // якою купують сьогодні. Число мусить бути на сторінці — інакше не беремо.
@@ -446,13 +453,21 @@ group("контекст для моделі");
     <footer>© 2026</footer></body></html>`;
   const context = buildPageContext(html, url("https://allo.ua/p/1"), null);
 
-  check("усі ціни сторінки — кандидати", context.amounts.includes(8999) && context.amounts.includes(9499), true);
+  const amounts = context.prices.map((price) => price.amount);
+  check("усі ціни сторінки — кандидати", amounts.includes(8999) && amounts.includes(9499), true);
+  check("валюта запам'ятовується разом із сумою", context.prices.some((p) => p.amount === 8999 && p.currency === "UAH"), true);
   check("платіж у кредит теж видно моделі, з оточенням", context.prompt.includes("₴/міс"), true);
   check("мініатюри не пропонуються", context.images.some((i) => i.includes("60x72")), false);
   check("фото товару пропонується", context.images.includes("https://cdn.allo.ua/tablet.webp"), true);
   check("скрипти не йдуть у модель", context.prompt.includes("Купи зараз"), false);
-  check("навігація не йде в модель", context.prompt.includes("Каталог Кошик"), false);
-  check("текст навколо товару йде в модель", context.prompt.includes("11-дюймовим"), true);
+  check("увесь текст сторінки йде в модель", context.prompt.includes("11-дюймовим"), true);
+  // Раніше тут вирізалися nav/header/footer — і разом із ними зникала назва
+  // товару на темах WordPress, де <h1> лежить усередині <header>.
+  check("заголовок у <header> не губиться", buildPageContext(
+    `<html><body><header><h1>Кейп з тканини букле</h1></header><p>Оверсайз</p></body></html>`,
+    url("https://shop.ua/p"),
+    null,
+  ).prompt.includes("Кейп з тканини букле"), true);
 }
 
 // Без ключа модель не викликається взагалі: перевірка ходить у мережу рівно
@@ -469,7 +484,7 @@ group("без ключа — жодного виклику");
     throw new Error("фікстури не ходять у мережу");
   }) as typeof fetch;
 
-  const suggestion = await suggestGiftCard({ prompt: "Кейп з тканини букле", images: [], amounts: [] });
+  const suggestion = await suggestGiftCard({ prompt: "Кейп з тканини букле", images: [], prices: [] });
   check("без ключа відповіді немає", suggestion, null);
   check("без ключа мережі немає", calls, 0);
 

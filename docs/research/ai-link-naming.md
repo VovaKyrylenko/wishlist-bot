@@ -255,3 +255,36 @@ The card came back with `2 222 ₴`, the product photo and a two-sentence descri
 alone: fastest of the three, correct on both live pages, ~$0.0015 per link at this prompt size.
 `openai/gpt-5.4-mini` stays the documented fallback. `gemini-3.6-flash` needs a much larger
 output budget for the same answer.
+
+## Spike 5 — does the text window earn its complexity? (2026-09-21)
+
+The window around the `<h1>` exists to keep the prompt small. The review of this branch found
+two ways it breaks on real markup (a multi-line `<h1>` does not match the whitespace-collapsed
+text; themes that wrap the title in `<header>` lose it entirely), which raised the obvious
+question: what if we simply send the whole page?
+
+Sizes, measured on the Allo tablet page (`1 627 KB` of HTML):
+
+| What we would send | size | tokens | cost per link |
+|---|---|---|---|
+| the raw HTML | 1 627 KB | ~416 000 | ~$0.13, and a second or more of pure parsing |
+| all visible text | 30.4 KB | ~13 000 | ~$0.004 |
+| window around `<h1>` (previous) | 8.9 KB | ~4 300 | ~$0.0013 |
+
+Raw HTML is out: 40× the cost of the text for information the model does not need, and it would
+only fit at all because `gemini-3.5-flash-lite` has a 1M-token context.
+
+Whole text against the window, same model, same prompt otherwise:
+
+| Page | window | whole text |
+|---|---|---|
+| Allo tablet | `8 999 ₴`, product photo, good description | identical answer |
+| Allo air fryer | `2 222 ₴`, product photo, good description | identical answer |
+| goodwine front page | no product | no product |
+
+Model latency with the 32-35 KB prompt, three runs each: 1 495 / 1 254 / 1 157 ms and
+1 188 / 1 147 / 1 361 ms — no slower than the window, which is dominated by the fetch anyway.
+
+**Verdict: send the whole visible text — STEAL.** Three times the tokens, still under half a
+cent a link, and it deletes the anchoring logic that the review showed to be fragile. Raw HTML
+— **HYPE, SKIP**.

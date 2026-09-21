@@ -31,9 +31,21 @@ const MODEL = process.env.AI_GIFT_CARD_MODEL ?? "google/gemini-3.5-flash-lite";
  */
 const MODEL_TIMEOUT_MS = 5000;
 
-/** Around the <h1> is where the product is; the rest of the body is furniture. */
-const TEXT_BEFORE_H1 = 500;
-const TEXT_AFTER_H1 = 7000;
+/** Under this, the answer cannot arrive; do not spend the call. */
+const MIN_MODEL_TIME_MS = 1000;
+
+/**
+ * The whole visible text of the page, not a window around the product.
+ *
+ * A window has to be anchored on something, and every anchor we tried broke on
+ * real markup: a multi-line <h1> does not match the collapsed text, and themes
+ * that wrap the title in <header> lose it entirely. A big shop page is ~30 KB
+ * of text once the tags are gone — about 13 000 tokens, a third of a cent — and
+ * on the pages measured the model answers the same with the whole text as with
+ * a perfect window (docs/research/ai-link-naming.md, spike 5). 60 000 characters
+ * is roughly twice the largest page measured.
+ */
+const MAX_TEXT_CHARS = 60000;
 
 const MAX_PRICE_CANDIDATES = 14;
 const MAX_IMAGE_CANDIDATES = 10;
@@ -100,12 +112,18 @@ export function looksUnusable(title: string | null, store: string | null, hostna
 /**
  * Every number that sits next to a currency, with the words around it.
  *
- * Grouped thousands must look like groups ("9 499", never "2 9 499"): a heading
- * that ends in a digit — "Redmi Pad 2" — sits right next to the price on a real
- * page, and a looser pattern reads the two as one 29 499 ₴ number.
+ * Both orders, because shops use both: "8 999 ₴" here, "$104.00" on anything
+ * built for an English-speaking audience. Grouped thousands must look like
+ * groups ("9 499", never "2 9 499"): a heading that ends in a digit — "Redmi
+ * Pad 2" — sits right next to the price on a real page, and a looser pattern
+ * reads the two as one 29 499 ₴ number.
  */
-const PRICE_IN_TEXT =
-  /(?:\d{1,3}(?:[\s\u00A0\u202F']\d{3})+|\d+)(?:[.,]\d{1,2})?\s?(?:₴|грн\.?|UAH|\$|USD|€|EUR|£|GBP|zł|PLN)/giu;
+const CURRENCY_TOKEN = "₴|грн\\.?|UAH|\\$|USD|€|EUR|£|GBP|zł|PLN";
+const NUMBER_TOKEN = "(?:\\d{1,3}(?:[\\s\\u00A0\\u202F']\\d{3})+|\\d+)(?:[.,]\\d{1,2})?";
+const PRICE_IN_TEXT = new RegExp(
+  `(?:${NUMBER_TOKEN}\\s?(?:${CURRENCY_TOKEN})|(?:${CURRENCY_TOKEN})\\s?${NUMBER_TOKEN})`,
+  "giu",
+);
 
 /**
  * Shops put the size in the path: `/cache/60x72/…` is a thumbnail, `/710x600/…`
@@ -125,21 +143,42 @@ export interface PageContext {
   prompt: string;
   /** Index → URL, exactly the list the model was shown. */
   images: string[];
-  /** Every amount the page itself states, so an invented price can be caught. */
-  amounts: number[];
+  /**
+   * Every price the page itself states, with the currency it was written in —
+   * an invented amount can be caught, and so can the right amount in the wrong
+   * currency.
+   */
+  prices: { amount: number; currency: string | null }[];
 }
 
+/** The entities a shop page actually uses, and numeric ones as a catch-all. */
+const ENTITY = /&(?:#(\d+)|#x([0-9a-f]+)|(nbsp|amp|lt|gt|quot|apos|laquo|raquo|mdash|ndash|hellip|deg|times));/gi;
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+  laquo: "«", raquo: "»", mdash: "—", ndash: "–", hellip: "…", deg: "°", times: "×",
+};
+
 /**
+ * The visible text of the page.
+ *
  * `.text()` glues neighbouring blocks together — `<div>9 499 ₴</div><div>8 999 ₴</div>`
  * becomes "9 499 ₴8 999 ₴", one unreadable number for the model and for our own
- * price scan. Replacing tags with spaces first keeps the boundaries a person
- * sees, and re-parsing the tag-free string turns `&nbsp;` and friends back into
- * characters.
+ * price scan — so tags are replaced with spaces instead. Entities are decoded
+ * by hand rather than by re-parsing the body: a second cheerio pass over a 2 MB
+ * page is the most expensive thing this module would do.
  */
 function visibleText($: cheerio.CheerioAPI): string {
   const html = $("body").html() ?? $.root().html() ?? "";
-  const spaced = html.replace(/<[^>]+>/g, " ");
-  return cheerio.load(`<div>${spaced}</div>`).root().text().replace(/\s+/g, " ").trim();
+  return html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(ENTITY, (whole, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+      if (dec) return String.fromCodePoint(Number(dec));
+      if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+      return name ? (NAMED_ENTITIES[name.toLowerCase()] ?? whole) : whole;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -149,7 +188,9 @@ function visibleText($: cheerio.CheerioAPI): string {
  */
 export function buildPageContext(html: string, url: URL, facts: LinkPreview | null): PageContext {
   const $ = cheerio.load(html);
-  $("script, style, noscript, svg, iframe, template, nav, header, footer").remove();
+  // Only the machinery goes. `nav`, `header` and `footer` used to go too, until
+  // a WordPress theme showed the product title living inside <header>.
+  $("script, style, noscript, svg, iframe, template").remove();
 
   const images: string[] = [];
   const labels: string[] = [];
@@ -176,25 +217,23 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
   const text = visibleText($);
 
   const candidates: string[] = [];
-  const amounts: number[] = [];
+  const prices: { amount: number; currency: string | null }[] = [];
+  const remember = (amount: number | null | undefined, currency: string | null) => {
+    if (amount === null || amount === undefined) return;
+    if (prices.some((price) => price.amount === amount && price.currency === currency)) return;
+    prices.push({ amount, currency });
+  };
+
   for (const match of text.matchAll(PRICE_IN_TEXT)) {
     const index = match.index ?? 0;
-    const amount = parsePrice(match[0])?.amount ?? null;
-    if (amount !== null && !amounts.includes(amount)) amounts.push(amount);
+    const parsed = parsePrice(match[0]);
+    remember(parsed?.amount, parsed?.currency ?? null);
     if (candidates.length >= MAX_PRICE_CANDIDATES) continue;
     const snippet = text.slice(Math.max(0, index - 60), index + match[0].length + 25).trim();
     if (!candidates.includes(snippet)) candidates.push(`… ${snippet} …`);
   }
-  if (facts?.priceAmount !== null && facts?.priceAmount !== undefined && !amounts.includes(facts.priceAmount)) {
-    amounts.push(facts.priceAmount);
-  }
+  remember(facts?.priceAmount, facts?.priceCurrency ?? null);
 
-  const heading = $("h1").first().text().trim().slice(0, 40);
-  const headingAt = heading ? text.indexOf(heading) : -1;
-  const around =
-    headingAt > 0
-      ? text.slice(Math.max(0, headingAt - TEXT_BEFORE_H1), headingAt + TEXT_AFTER_H1)
-      : text.slice(0, TEXT_BEFORE_H1 + TEXT_AFTER_H1);
 
   const prompt = [
     `Адреса: ${url.toString()}`,
@@ -210,11 +249,11 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
     "Кандидати фото:",
     images.map((image, index) => `${index}. ${image}${labels[index] ? ` — ${labels[index]}` : ""}`).join("\n") || "—",
     "",
-    "Текст сторінки навколо товару:",
-    `"""\n${around}\n"""`,
+    "Текст сторінки:",
+    `"""\n${text.slice(0, MAX_TEXT_CHARS)}\n"""`,
   ].join("\n");
 
-  return { prompt, images, amounts };
+  return { prompt, images, prices };
 }
 
 // Ukrainian, because the model answers in the language it is addressed in and
@@ -282,14 +321,22 @@ interface ModelAnswer {
  * timeout, gateway error, wrong shape: a good card matters, but not enough to
  * break adding a gift.
  */
-export async function suggestGiftCard(context: PageContext): Promise<GiftCardSuggestion | null> {
+export async function suggestGiftCard(
+  context: PageContext,
+  options: { timeoutMs?: number } = {},
+): Promise<GiftCardSuggestion | null> {
   const key = process.env.AI_GATEWAY_API_KEY;
   if (!key || !context.prompt.trim()) return null;
+
+  // The caller owns the whole lookup's budget; asking with a second left would
+  // only spend money on an answer that cannot arrive in time.
+  const timeout = Math.min(options.timeoutMs ?? MODEL_TIMEOUT_MS, MODEL_TIMEOUT_MS);
+  if (timeout < MIN_MODEL_TIME_MS) return null;
 
   try {
     const res = await fetch(`${GATEWAY}/chat/completions`, {
       method: "POST",
-      signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeout),
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: MODEL,
@@ -359,9 +406,25 @@ function readPrice(parsed: ModelAnswer, context: PageContext): StructuredPrice |
 
   const price = parsePrice(`${rawPrice} ${rawCurrency}`);
   if (!price || !isPlausibleAmount(price.amount)) return null;
-  if (context.amounts.length > 0 && !context.amounts.includes(price.amount)) return null;
 
-  return { text: formatPrice(price), amount: price.amount, currency: price.currency };
+  // A page with no price of its own (a caption, a photo post) leaves nothing to
+  // check against; there the model's reading is all we have.
+  if (context.prices.length === 0) {
+    return { text: formatPrice(price), amount: price.amount, currency: price.currency };
+  }
+
+  const onPage = context.prices.filter((candidate) => candidate.amount === price.amount);
+  if (onPage.length === 0) return null;
+
+  // The amount is real. The currency may still be the model's own invention —
+  // a page priced in ₴ answered as USD would turn 8 999 ₴ into 8 999 $ — so
+  // unless the page wrote that currency next to that amount, the page wins.
+  const currency = onPage.some((candidate) => candidate.currency === price.currency)
+    ? price.currency
+    : onPage[0].currency;
+  const checked = { amount: price.amount, currency };
+
+  return { text: formatPrice(checked), amount: checked.amount, currency: checked.currency };
 }
 
 /** An index into the list we showed, or nothing. Never a URL from the model. */

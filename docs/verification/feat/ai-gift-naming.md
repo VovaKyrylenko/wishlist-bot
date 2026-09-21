@@ -90,3 +90,29 @@ FINDINGS: Three defects, each found by running the thing rather than by reading 
     `9 499 ₴8 999 ₴`. Tags are replaced with spaces before the text is read.
   - The price scanner read `Redmi Pad 2` + `9 499 ₴` as `29 499 ₴`, because grouped thousands
     were matched loosely. Groups must now look like groups.
+
+## Run 4 — after the review: whole text, checked currency, one budget (2026-09-21)
+
+VERDICT: PASS
+CLAIM:   The five defects the `/code-review` pass found are gone, and the card is still right on
+         the live pages.
+METHOD:  `pnpm test`, `pnpm run verify:scrape`, and live lookups through the real gateway.
+STEPS:
+  1. Multi-line `<h1>` and a title inside `<header>` — both used to lose the product text
+     -> the window is gone; the whole visible text is sent, and both cases are fixtures now.
+  2. `$104.00` (symbol first) on a page that also says `Доставка 99 грн`
+     -> candidate prices now include `{104, USD}`; before, only `{99}` was seen and a correct
+     model answer of 104 would have been refused.
+  3. Model answers `8999` with `currency: "USD"` on a page priced in `₴`
+     -> the card shows `8 999 ₴`: the page's own currency wins for that amount.
+  4. `suggestGiftCard(context, { timeoutMs: 200 })`
+     -> returns null and makes no request; the fetch and the model now share one 8 s deadline.
+  5. Live: Allo tablet
+     -> `Планшет Xiaomi Redmi Pad 2 WiFi 4/128GB Graphite Gray`, `8 999 ₴`, 710×600 product
+     photo, two-sentence description, 2 121 ms end to end (one HTML parse fewer than before).
+  6. Model-only latency on the 32-35 KB prompts, three runs per page
+     -> 1 495 / 1 254 / 1 157 ms and 1 188 / 1 147 / 1 361 ms.
+EVIDENCE: `Test Files 8 passed (8)` · `Tests 157 passed (157)`; `Усі перевірки пройдено`.
+FINDINGS: The two low-severity review findings were also addressed: entity decoding no longer
+re-parses the whole body (one cheerio pass instead of two), and the "a URL instead of an index"
+case now actually passes a URL.
