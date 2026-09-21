@@ -488,7 +488,10 @@ export async function applyListAnswer(ctx: MyContext, pending: Pending, text: st
     await createList(ctx, text);
     return true;
   }
-  if (!pending.id) return false;
+  // Only list questions are ours. A gift question carries a gift id, and
+  // reading it as a list id below found no list, showed "list deleted" and
+  // swallowed every saved-gift edit before gifts.ts ever saw it.
+  if (!pending.action.startsWith("wl.") || !pending.id) return false;
 
   const access = await requireList(ctx, pending.id, { owner: true });
   if (!access) {
