@@ -16,7 +16,7 @@ fallback that asks the person — and in what order.
    updates; leaving a vendor must be one `fetch` swap.
 5. **Legal/ToS posture** acceptable for a personal bot (no credentials, no mass crawling).
 
-Status: complete (2026-09-23), revised the same day after live tests (sections H, I). Recommendation needs the owner's decision before an ADR.
+Status: complete (2026-09-23), revised the same day after live tests (sections H-J). Recommendation needs the owner's decision before an ADR.
 
 ## Baseline (confirmed 2026-09-23)
 
@@ -340,11 +340,54 @@ Chrome, Comfy / Notino / Rozetka:
 Across three boots: Rozetka 1/3, Notino 1/3, Comfy 0/3. The "5 of 7 from Vercel" above came from
 one lucky address. On Vercel's IPs, a sandbox browser is a partial layer, not a solution.
 Snapshots are region-bound ("The snapshot is available in `fra1`…"), so other regions were not
-tested. Building the rotation any further was stopped by this session's permission guard.
+tested here. The rotation was then built out properly, see J.
 
 Cost on Pro: billed per CPU and memory time. The sweep's estimate is under ~$1/month at our
 volume ([pricing](https://vercel.com/docs/sandbox/pricing), read 2026-09-10 by the sweep). Not
 re-checked against the Pro plan's included usage.
+
+### J. Rotating across fresh sandboxes and regions (2026-09-23)
+
+The owner switched this session out of auto mode and approved each step. The spike tool
+(`rotator.mjs`, kept outside the repo) has one snapshot per region — snapshots do not cross
+regions. It boots fresh sandboxes, each with its own AWS egress IP, and reads pages with the
+windowed Chrome.
+
+**Pass rates: 3 rounds × 5 European regions = 15 boots, 15 distinct IPs.**
+
+| Site | Passed |
+|---|---|
+| kasta, brain | 15/15 |
+| notino | 7/15 |
+| rozetka (product page, price `799` every time) | 5/14 (one lhr1 boot returned no rows) |
+| **comfy** | **0/15** |
+
+By region, all sites together: fra1 10/15, cdg1 10/15, lhr1 9/14, arn1 7/15, dub1 6/15.
+
+- An address that let Rozetka in usually let Notino in too.
+- Every Cloudflare pass answered `200` on the first response; no `cf-mitigated: challenge` page
+  ever cleared later. So the probe now gives a challenged page 3 s instead of 12 s and moves on.
+- **Not only the IP decides.** 16.61.12.34 read Rozetka in one run and was refused in another;
+  3.70.209.67 likewise. Cloudflare scores each visit, so a plain retry can pass too.
+
+**Production shape, measured: `read` mode.** A wave of 3 sandboxes started in parallel
+(fra1 / cdg1 / lhr1). The first one that reads the page wins; a second wave runs only if all
+three are refused.
+
+| Run | Winner | Card ready (from script start) |
+|---|---|---|
+| 1 | fra1, 3.69.45.180 | 14.0 s |
+| 2 | lhr1, 16.61.12.34 | 14.5 s |
+| 3 | cdg1, 15.224.115.67 (fra1 and lhr1 refused) | 19.3 s |
+| 4 | cdg1, 13.38.8.77 (lhr1 and fra1 refused) | 15.8 s |
+
+- **Rozetka read 4 of 4 times, always in the first wave.**
+- The winning sandbox itself took 8-13 s. The other ~5-6 s is this spike's local overhead (a
+  fresh Node process, an OIDC refresh through the CLI). The spike also spends up to 3 s asking
+  ipify for its IP. A production call pays neither, so expect roughly 8-12 s. That is past the
+  8 s lookup budget, so it only works as a background fill.
+- Comfy stays closed to every Vercel address tried. Rotation within AWS cannot fix it. A
+  residential address can (Comfy opened from the owner's home IP), and so can the person.
 
 ## Verdicts
 
@@ -356,7 +399,8 @@ Criteria numbers refer to the list at the top.
 | Search API by product ID (Brave first) as the automatic fallback | **STEAL — reserve, after a 20-link spike** | 1: the one test named the product right; 2: recurring free tier covers us; 3: 1-2 s per call (vendor claim, not measured); 4: one `fetch`; 5: clean. Price accuracy unproven |
 | Screenshot → model | **STEAL — last layer** | 1: covers every wall incl. Instagram; 2: ≈ $0.0006; 5: clean. Costs the person a step |
 | Browser headers instead of the `WishlistBot` User-Agent | **STEAL — with step one** | 1: +2 of 13 blocked shops, measured; 2-4: free, a header change |
-| Windowed Chrome in a Vercel Sandbox, called only on a wall | **INTERESTING BUT HEAVY — owner's call** | 1: an IP lottery on Vercel (Rozetka 1/3 boots, Comfy 0/3, live test I); 3: 6-8 s cold, so it only works filled in after the first screen. 2, 4: cheap, and no machine of ours. It becomes a real layer only with clean IPs, which is the proxy decision |
+| Windowed Chrome in Vercel Sandbox, a wave of 3 fresh sandboxes on a wall | **STEAL — second, as a background fill** | 1: Rozetka 4/4 in the first wave, Kasta and Brain 15/15, Notino 7/15 per boot, Comfy 0/15 (J); 2: pennies per wall on Pro (estimate); 4: our code on Vercel, no machine of ours. 3: ~8-12 s, so it fills the card after the first screen |
+| Residential proxy behind the same sandbox Chrome | **INTERESTING BUT HEAVY — only for the Comfy class** | 1: the one fix for shops that refuse every AWS address (Comfy opened from a home IP); but 2: pay per GB with minimum purchases (not priced), and 5: pick a provider whose addresses come from people who agreed to share them. Adopt if the misses after the sandbox wave matter |
 | Paid unlocker (Bright Data / Zyte) | **INTERESTING BUT HEAVY — backup to the own browser** | 1: 90-95 % in third-party tests; 2: fits a free tier; 4: no machine to keep alive. But 3: p95 far over 8 s; an outside dependency for a job our own browser did in 1 s |
 | Web Bot Auth / Verified Bots | **INTERESTING BUT HEAVY** | 5: the honest direction; but 1: does not open Rozetka's custom rule. Changes if big shops start exempting signed agents |
 | Telegram preview via MTProto `getMessages` | **INTERESTING BUT HEAVY** | 3-4: MTProto session in a function; 1: unknown. Killed outright if a hand-pasted Rozetka link shows no preview in Telegram |
@@ -368,40 +412,41 @@ Criteria numbers refer to the list at the top.
 
 ## Recommendation
 
-Revised 2026-09-23 after the owner's position and the live tests (sections H and I). The first
+Revised 2026-09-23 after the owner's position and the live tests (sections H-J). The first
 version recommended stopping short of any real browser. It is kept in git history.
 
 A plain fetch already reaches the long tail our users actually paste: of 34 saved links, 28 are
 small shops that answer `200` (27 saved with a price), 3 are Instagram (a login wall, a different
-problem) and 3 are Rozetka (all without a price). The wall is 13 of 30 big shops. A windowed
-Chrome in a Vercel Sandbox opened 5 of 7 walls, Rozetka included. So the design is: keep the cheap
-fetch first, and send only walled links to that browser.
+problem) and 3 are Rozetka (all without a price). The wall is 13 of 30 big shops. No single
+automatic method opens all of them, so "every case closed" means a chain. Each layer is tried only
+when the one before it failed, and the last layer is the person, who never fails.
 
-1. **Tell a wall from a missing page.** Watch for `cf-mitigated: challenge`, `x-amzn-waf-action`,
-   `403`/`429`/`503` from a WAF, and a `2xx` with an empty body (#20). The model is never called
-   on an empty page. In the same change, **send browser headers instead of `WishlistBot`** —
-   that opens answear and watsons for free.
-2. **On a wall, read the page with a windowed Chrome in a Vercel Sandbox.** Boot from a prebuilt
-   snapshot (Chrome + Xvfb + Playwright), open the URL, return the rendered HTML, stop the
-   sandbox. That HTML goes through the existing ADR 0006 path unchanged. Nothing to keep alive,
-   no machine of ours, authenticated by the project's own OIDC token.
-3. **Fill the card after the first screen, not inside it.** A cold sandbox call takes 6-8 s, the
-   whole current budget. So on a wall the bot answers at once with the draft it has (the link,
-   «Дивлюся, що там…»), then edits that same screen when the sandbox returns. The function keeps
-   running after the reply (Vercel `waitUntil`), with its own time limit, to be set in the design. This fits the
-   live-screen design: an edited screen, not a new message. It is the one real design change, so
-   it goes through the design cycle before implementation.
-4. **The link always works, whatever happens above.** If the sandbox is also blocked (Comfy and
-   Notino today) or fails, the draft stays and the bot asks the person — one `notice` line, no 💜,
+1. **Tell a wall from a missing page, and look like a browser.** Watch for `cf-mitigated:
+   challenge`, `x-amzn-waf-action`, `403`/`429`/`503` from a WAF, and a `2xx` with an empty body
+   (#20). The model is never called on an empty page. Send browser headers instead of
+   `WishlistBot` — that opens answear and watsons for free. Instant.
+2. **On a wall, answer at once and fill the card in the background.** The bot shows the draft it
+   has (the link, «Дивлюся, що там…») and keeps working after the reply (Vercel `waitUntil`).
+   When a later layer succeeds, it edits that same screen — the live-screen design, no new
+   message. **A person's own input always wins:** a name or price they typed in the meantime is
+   never overwritten.
+3. **Background layer A — a wave of 3 fresh sandboxes** (fra1, cdg1, lhr1), windowed Chrome, the
+   first page read wins, a second wave only if all three are refused. Measured: Rozetka 4/4 in the
+   first wave, ~8-12 s. The HTML goes through the existing ADR 0006 model path unchanged.
+4. **Background layer B — the search API by product ID** (E), for what A could not open. It never
+   touches the shop, so it works where every address is refused (Comfy). It gives at least a name
+   and a photo; a price only as «приблизно», because snippets can be months old.
+5. **Last layer — the person.** If nothing filled the card, the `notice` asks. One line, no 💜,
    in `src/text.ts`, e.g. «Магазин не пускає мене подивитись 😕 Напиши назву — або надішли
-   знімок екрана з товаром». The picture goes through a vision call. The search API (E) and a paid
-   unlocker (B) stay in reserve, for the day the misses matter.
+   знімок екрана з товаром». A picture goes through a vision call.
+6. **Held in reserve — a residential proxy behind layer A** — only if the usage data shows that
+   Comfy-class shops still reach the person often enough to matter.
 
 The Telegram preview (D) is optional: the flow above works without it.
 
-Open before building: a lean sandbox call measured end to end; what the sandbox costs on Pro in
-practice (watch the usage page for the first weeks); and whether reusing one warm sandbox for a
-few minutes after a wall is worth it when links come in bursts.
+Before building: a design-cycle pass on step 2 (the background fill is the one real change to the
+bot's flow); a lean layer-A call measured from a deployed function, not from a laptop; and the
+Sandbox line of the Pro usage page watched for the first weeks.
 
 This settles a direction that constrains future work. Once the owner agrees, it becomes an ADR
 citing this report (`/write-adr`).
@@ -416,9 +461,11 @@ the 43 % as a snapshot.
   walled sites were re-tested from Vercel, and only with a browser (section I). (Indirect
   comfort: 27 of the 28 small-shop links in the database carry a price, which suggests production
   reached those shops — though a person may have typed some prices.)
-- **Repeatability of the Vercel result.** One probe run. Egress IPs change on every boot, so
-  Rozetka may pass on one boot and not on the next. A 20-boot run would give a rate, not an
-  anecdote.
+- **Sample sizes.** Rates in J come from 15 boots and 4 `read` runs on one day, for one Rozetka
+  product. Enough to choose a design, not to promise a percentage. Cloudflare can tighten the rule
+  tomorrow.
+- **The four untested Cloudflare shops** (yakaboo, book-ye, intertop, eva) were never tried with
+  the sandbox browser.
 - **Whether the database in `.env` is production.** The 34 links look like real use; not
   confirmed.
 - **Search-API accuracy at scale.** One hand query in Brave's web UI, not the API; no photo
