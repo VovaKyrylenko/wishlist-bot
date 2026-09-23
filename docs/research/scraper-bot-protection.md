@@ -16,7 +16,7 @@ fallback that asks the person — and in what order.
    updates; leaving a vendor must be one `fetch` swap.
 5. **Legal/ToS posture** acceptable for a personal bot (no credentials, no mass crawling).
 
-Status: complete (2026-09-23), revised the same day after live tests (section H). Recommendation needs the owner's decision before an ADR.
+Status: complete (2026-09-23), revised the same day after live tests (sections H, I). Recommendation needs the owner's decision before an ADR.
 
 ## Baseline (confirmed 2026-09-23)
 
@@ -111,8 +111,8 @@ load-bearing claim is repeated here with its source and date.
   passes locally ([#224](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/224),
   2026-07). `puppeteer-extra-plugin-stealth` is abandoned (last commit 2023-03-01).
   **Our own test (H) adds the other half:** from a home IP, headless Chrome failed on all five
-  Cloudflare shops, and the same Chrome with a window passed them all. So both matter — the mode
-  for certain, the IP not yet tested.
+  Cloudflare shops, and the same Chrome with a window passed them all. So both matter. From Vercel (I), the windowed browser opened 5 of 7 and lost Comfy and Notino,
+  which is the IP half showing.
 
 ### B. Paid unlocker as a fallback
 
@@ -290,6 +290,48 @@ What this shows:
   confuse it.
 - One run, one IP. A datacenter IP was **not** tested and may behave differently (see A).
 
+### I. The same test from Vercel (2026-09-23)
+
+Owner's constraints, recorded 2026-09-23: no personal machine in the loop, run on Vercel, keep it
+as cheap as possible. The project is on **Vercel Pro**.
+
+Setup: a Vercel Sandbox (`@vercel/sandbox` 3.3.0) in `fra1`, Amazon Linux 2023, 2 vCPU. Google
+Chrome 154 and Xvfb installed with `dnf`, Playwright 1.63, then saved as a snapshot. Setup took
+~45 s once. Same `probe.mjs`, with the windowed pass drawn on the Xvfb virtual display. Egress IPs
+are AWS Frankfurt addresses (18.194.13.111, 63.180.17.233, 18.153.59.39) and change on every boot.
+
+| Site | Headless | Window (Xvfb) |
+|---|---|---|
+| rozetka (product page) | `403`, stuck | **`200`, 1.7 s, name + price `799`** |
+| comfy | `403`, stuck | **`403`, stuck** (passed from home) |
+| kasta | `403`, stuck | `200`, 1.6 s |
+| brain | `403`, stuck | `200`, 1.8 s |
+| notino | `403`, stuck | **`403`, stuck** (passed from home) |
+| olx | `200`, 1.0 s | `200`, 1.6 s |
+| makeup (product page) | cleared, 1.0 s, name | cleared, 1.0 s, name |
+
+- **5 of 7 walls open from Vercel, including Rozetka with its price.** Comfy and Notino let the
+  same browser through from a home IP and not from AWS, so for those two the IP is what fails.
+- Headless is 0 of 5 on Cloudflare shops from Vercel too. That settles it: headless is out
+  everywhere.
+
+Startup, measured 3 times (boot from the snapshot, Xvfb, windowed Chrome on `about:blank`, no
+shop contacted):
+
+| Run | Sandbox ready | Chrome ready after that | Whole call incl. SDK round-trips |
+|---|---|---|---|
+| 1 | 0.53 s | 1.28 s | 5.2 s |
+| 2 | 0.69 s | 1.38 s | 5.6 s |
+| 3 | 0.87 s | 1.48 s | 6.8 s |
+
+A cold call — boot, Chrome, then a ~1.7 s page — lands at **roughly 6-8 s**. That is the whole
+lookup budget spent before the model even starts. The spike's round-trips (file upload, an extra
+`curl`) inflate the total, so a lean version will be faster. How much faster was not measured.
+
+Cost on Pro: billed per CPU and memory time. The sweep's estimate is under ~$1/month at our
+volume ([pricing](https://vercel.com/docs/sandbox/pricing), read 2026-09-10 by the sweep). Not
+re-checked against the Pro plan's included usage.
+
 ## Verdicts
 
 Criteria numbers refer to the list at the top.
@@ -297,10 +339,10 @@ Criteria numbers refer to the list at the top.
 | Option | Verdict | Deciding criteria |
 |---|---|---|
 | Detect the wall and stop feeding it to the model | **STEAL — first** | 1: fixes a live bug (makeup `202`); 2-5: free, no vendor |
-| Search API by product ID (Brave first) as the automatic fallback | **STEAL — second, after a 20-link spike** | 1: the one test named the product right; 2: recurring free tier covers us; 3: 1-2 s per call (vendor claim, not measured); 4: one `fetch`; 5: clean. Price accuracy unproven |
-| Screenshot → model | **STEAL — third** | 1: covers every wall incl. Instagram; 2: ≈ $0.0006; 5: clean. Costs the person a step |
+| Search API by product ID (Brave first) as the automatic fallback | **STEAL — reserve, after a 20-link spike** | 1: the one test named the product right; 2: recurring free tier covers us; 3: 1-2 s per call (vendor claim, not measured); 4: one `fetch`; 5: clean. Price accuracy unproven |
+| Screenshot → model | **STEAL — last layer** | 1: covers every wall incl. Instagram; 2: ≈ $0.0006; 5: clean. Costs the person a step |
 | Browser headers instead of the `WishlistBot` User-Agent | **STEAL — with step one** | 1: +2 of 13 blocked shops, measured; 2-4: free, a header change |
-| Real Chrome with a window, kept running, called only on a wall | **STEAL — if a one-off test from its host passes** | 1: 7 of 7 walls passed, Rozetka with a price; 3: 1-3 s per page; 4: our own code, no vendor. Open question: which host. Vercel Functions only run headless Chrome, and headless failed 5 of 5 |
+| Windowed Chrome in a Vercel Sandbox, called only on a wall | **STEAL — second** | 1: 5 of 7 walls from Vercel, Rozetka with a price (live test I); 2: under ~$1/month on Pro (estimate); 4: our code, Vercel we already use, no machine of ours. But 3: 6-8 s cold, so the card has to be filled after the first screen (see recommendation) |
 | Paid unlocker (Bright Data / Zyte) | **INTERESTING BUT HEAVY — backup to the own browser** | 1: 90-95 % in third-party tests; 2: fits a free tier; 4: no machine to keep alive. But 3: p95 far over 8 s; an outside dependency for a job our own browser did in 1 s |
 | Web Bot Auth / Verified Bots | **INTERESTING BUT HEAVY** | 5: the honest direction; but 1: does not open Rozetka's custom rule. Changes if big shops start exempting signed agents |
 | Telegram preview via MTProto `getMessages` | **INTERESTING BUT HEAVY** | 3-4: MTProto session in a function; 1: unknown. Killed outright if a hand-pasted Rozetka link shows no preview in Telegram |
@@ -312,40 +354,40 @@ Criteria numbers refer to the list at the top.
 
 ## Recommendation
 
-Revised 2026-09-23 after the owner's position and the live tests (section H). The first version
-recommended stopping short of any real browser. It is kept in git history.
+Revised 2026-09-23 after the owner's position and the live tests (sections H and I). The first
+version recommended stopping short of any real browser. It is kept in git history.
 
 A plain fetch already reaches the long tail our users actually paste: of 34 saved links, 28 are
 small shops that answer `200` (27 saved with a price), 3 are Instagram (a login wall, a different
-problem) and 3 are Rozetka (all without a price). The wall is 13 of 30 big shops. A real Chrome
-with a window got through all 7 walls tested, in 1-3 s. So the design is: keep the cheap fetch
-first, and send only walled links to a real browser.
+problem) and 3 are Rozetka (all without a price). The wall is 13 of 30 big shops. A windowed
+Chrome in a Vercel Sandbox opened 5 of 7 walls, Rozetka included. So the design is: keep the cheap
+fetch first, and send only walled links to that browser.
 
 1. **Tell a wall from a missing page.** Watch for `cf-mitigated: challenge`, `x-amzn-waf-action`,
    `403`/`429`/`503` from a WAF, and a `2xx` with an empty body (#20). The model is never called
    on an empty page. In the same change, **send browser headers instead of `WishlistBot`** —
    that opens answear and watsons for free.
-2. **A small page-reader service with a real Chrome.** Chrome runs with a window (on a server,
-   under a virtual display) and stays open between requests. It exposes one endpoint: URL in,
-   rendered HTML out, protected by a secret token. It must reuse the same public-address checks
-   as `assertPublicUrl`, because an endpoint that opens any URL is an obvious way into a private
-   network. The bot calls it **only after step 1 saw a wall**, and its HTML goes through the
-   existing ADR 0006 path unchanged. Timeout ~5 s, so a slow reader still leaves the whole lookup
-   inside the 8 s budget.
-3. **Where it runs is the one open question. One test settles it:** run `probe.mjs` (with a
-   window, under a virtual display) on a small VPS.
-   - Passes → host the reader there: always on, a few euros a month (price not checked).
-   - Fails (the datacenter IP is the problem) → run the same reader on an always-on machine at
-     home, reached through a tunnel. This is the setup proven today. Or switch it to a paid
-     unlocker API (Bright Data's free tier, if its 5 000/month holds). The bot does not care
-     which one answers.
-4. **The link always works, whatever happens above.** If the reader is down or also blocked, the
-   bot asks the person — one `notice` line, no 💜, in `src/text.ts`, e.g. «Магазин не пускає мене
-   подивитись 😕 Напиши назву — або надішли знімок екрана з товаром». The picture goes through a
-   vision call. The search API (E) stays in reserve as an extra automatic step, if the reader
-   proves flaky.
+2. **On a wall, read the page with a windowed Chrome in a Vercel Sandbox.** Boot from a prebuilt
+   snapshot (Chrome + Xvfb + Playwright), open the URL, return the rendered HTML, stop the
+   sandbox. That HTML goes through the existing ADR 0006 path unchanged. Nothing to keep alive,
+   no machine of ours, authenticated by the project's own OIDC token.
+3. **Fill the card after the first screen, not inside it.** A cold sandbox call takes 6-8 s, the
+   whole current budget. So on a wall the bot answers at once with the draft it has (the link,
+   «Дивлюся, що там…»), then edits that same screen when the sandbox returns. The function keeps
+   running after the reply (Vercel `waitUntil`), with its own time limit, to be set in the design. This fits the
+   live-screen design: an edited screen, not a new message. It is the one real design change, so
+   it goes through the design cycle before implementation.
+4. **The link always works, whatever happens above.** If the sandbox is also blocked (Comfy and
+   Notino today) or fails, the draft stays and the bot asks the person — one `notice` line, no 💜,
+   in `src/text.ts`, e.g. «Магазин не пускає мене подивитись 😕 Напиши назву — або надішли
+   знімок екрана з товаром». The picture goes through a vision call. The search API (E) and a paid
+   unlocker (B) stay in reserve, for the day the misses matter.
 
 The Telegram preview (D) is optional: the flow above works without it.
+
+Open before building: a lean sandbox call measured end to end; what the sandbox costs on Pro in
+practice (watch the usage page for the first weeks); and whether reusing one warm sandbox for a
+few minutes after a wall is worth it when links come in bursts.
 
 This settles a direction that constrains future work. Once the owner agrees, it becomes an ADR
 citing this report (`/write-adr`).
@@ -356,9 +398,13 @@ citing this report (`/write-adr`).
 change without notice — a shop that is open today can close tomorrow, and the reverse. Treat
 the 43 % as a snapshot.
 
-- **Measurement from Vercel's IPs.** All probes ran from the owner's Mac. Production can only
-  do worse. (Indirect comfort: 27 of the 28 small-shop links in the database carry a price,
-  which suggests production reached those shops — though a person may have typed some prices.)
+- **Plain fetch from Vercel's IPs.** The 30-shop survey ran from the owner's Mac. Only the 7
+  walled sites were re-tested from Vercel, and only with a browser (section I). (Indirect
+  comfort: 27 of the 28 small-shop links in the database carry a price, which suggests production
+  reached those shops — though a person may have typed some prices.)
+- **Repeatability of the Vercel result.** One probe run. Egress IPs change on every boot, so
+  Rozetka may pass on one boot and not on the next. A 20-boot run would give a rate, not an
+  anecdote.
 - **Whether the database in `.env` is production.** The 34 links look like real use; not
   confirmed.
 - **Search-API accuracy at scale.** One hand query in Brave's web UI, not the API; no photo
