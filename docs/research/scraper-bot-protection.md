@@ -16,7 +16,7 @@ fallback that asks the person — and in what order.
    updates; leaving a vendor must be one `fetch` swap.
 5. **Legal/ToS posture** acceptable for a personal bot (no credentials, no mass crawling).
 
-Status: complete (2026-09-23). Recommendation needs the owner's decision before an ADR.
+Status: complete (2026-09-23), revised the same day after live tests (section H). Recommendation needs the owner's decision before an ADR.
 
 ## Baseline (confirmed 2026-09-23)
 
@@ -110,6 +110,9 @@ load-bearing claim is repeated here with its source and date.
   ([#686](https://github.com/daijro/camoufox/issues/686), 2026-07); patchright fails in Docker,
   passes locally ([#224](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/224),
   2026-07). `puppeteer-extra-plugin-stealth` is abandoned (last commit 2023-03-01).
+  **Our own test (H) adds the other half:** from a home IP, headless Chrome failed on all five
+  Cloudflare shops, and the same Chrome with a window passed them all. So both matter — the mode
+  for certain, the IP not yet tested.
 
 ### B. Paid unlocker as a fallback
 
@@ -248,6 +251,45 @@ Practical reading by the research agent, **not legal advice**; sources 2026-09-2
   an "unlocker" whose product is solving it — is the one step that turns "a user's link" into
   "we defeated the shop's protection".
 
+### H. Live tests on the owner's machine (2026-09-23)
+
+The owner's position, recorded 2026-09-23: the bot reads one page per paste, the same name,
+price and description any visitor sees. That is a person's visit, not spam or a crawl, so
+reading the page the way a browser does is in scope. **Accepted risk:** shops like Rozetka block
+all automation, including competitors scraping prices, not only floods. So a terms-level grey
+zone remains. At our volume the practical risk is low, and the owner accepts it. This supersedes
+the "circumvention line" framing in G and in the first version of the recommendation.
+
+**1. Browser headers instead of `WishlistBot`** (plain Node `fetch` with a Chrome User-Agent and
+`sec-ch-ua`/`sec-fetch-*` headers, from the owner's Mac): **2 of the 13 blocked shops open** —
+answear.ua and watsons.ua (Akamai) now answer `200` with the real page. The 9 Cloudflare shops,
+olx.ua (CloudFront) and makeup.com.ua (AWS WAF) still challenge: they need JavaScript to run.
+
+**2. A real browser** (Playwright 1.63 driving the installed Google Chrome 153; no stealth
+plugins, no solvers, nothing clicked; a fresh profile per mode; run by the owner from the same
+Mac). Timings are per page with the browser already open:
+
+| Site | Chrome without a window (headless) | Chrome with a window |
+|---|---|---|
+| rozetka (product page) | `403`, stuck on «Трохи зачекайте…» for 15 s | **`200`, 1.1 s, name + price `799`** |
+| comfy | `403`, stuck | `200`, 1.7 s |
+| kasta | `403`, stuck | `200`, 1.3 s |
+| brain | `403`, stuck | `200`, 2.9 s |
+| notino | `403`, stuck | `200`, 1.8 s |
+| olx (CloudFront) | `200`, 0.8 s | `200`, 0.8 s |
+| makeup (AWS WAF, product page) | `202` → cleared, 2.8 s, name | `202` → cleared, 1.1 s, name |
+
+What this shows:
+- **Cloudflare separates headless from windowed Chrome, not our IP from other IPs.** The windowed
+  run came seconds after the headless one, from the same home IP. It got a `200` on the first
+  response, with no challenge at all.
+- AWS WAF (makeup) and CloudFront (olx) clear on their own in any real browser.
+- A real browser page fits the 8 s budget comfortably, **if the browser is already running**.
+  Launch time was not measured.
+- The price came from Rozetka's own JSON-LD (`799`, the sale price). The old `1 499` did not
+  confuse it.
+- One run, one IP. A datacenter IP was **not** tested and may behave differently (see A).
+
 ## Verdicts
 
 Criteria numbers refer to the list at the top.
@@ -257,10 +299,12 @@ Criteria numbers refer to the list at the top.
 | Detect the wall and stop feeding it to the model | **STEAL — first** | 1: fixes a live bug (makeup `202`); 2-5: free, no vendor |
 | Search API by product ID (Brave first) as the automatic fallback | **STEAL — second, after a 20-link spike** | 1: the one test named the product right; 2: recurring free tier covers us; 3: 1-2 s per call (vendor claim, not measured); 4: one `fetch`; 5: clean. Price accuracy unproven |
 | Screenshot → model | **STEAL — third** | 1: covers every wall incl. Instagram; 2: ≈ $0.0006; 5: clean. Costs the person a step |
-| Paid unlocker (Bright Data / Zyte) | **INTERESTING BUT HEAVY** | 1: highest reach (90-95 % in third-party tests); 2: fits a free tier; but 3: p95 far over 8 s, 5: it is challenge-solving by proxy. Changes if a shop grants permission, or a lawyer says a Cloudflare challenge is not a protection measure for facts |
+| Browser headers instead of the `WishlistBot` User-Agent | **STEAL — with step one** | 1: +2 of 13 blocked shops, measured; 2-4: free, a header change |
+| Real Chrome with a window, kept running, called only on a wall | **STEAL — if a one-off test from its host passes** | 1: 7 of 7 walls passed, Rozetka with a price; 3: 1-3 s per page; 4: our own code, no vendor. Open question: which host. Vercel Functions only run headless Chrome, and headless failed 5 of 5 |
+| Paid unlocker (Bright Data / Zyte) | **INTERESTING BUT HEAVY — backup to the own browser** | 1: 90-95 % in third-party tests; 2: fits a free tier; 4: no machine to keep alive. But 3: p95 far over 8 s; an outside dependency for a job our own browser did in 1 s |
 | Web Bot Auth / Verified Bots | **INTERESTING BUT HEAVY** | 5: the honest direction; but 1: does not open Rozetka's custom rule. Changes if big shops start exempting signed agents |
 | Telegram preview via MTProto `getMessages` | **INTERESTING BUT HEAVY** | 3-4: MTProto session in a function; 1: unknown. Killed outright if a hand-pasted Rozetka link shows no preview in Telegram |
-| Own headless browser (Vercel Function / Sandbox, stealth libs) | **SKIP** | 1: datacenter IPs fail (#1741, #686, #224); 3: 3-6 s cold start; 4: arms race, #507; 5: circumvention |
+| Headless Chrome (in a Vercel Function, Sandbox, or anywhere) | **SKIP** | 1: 0 of 5 Cloudflare shops passed, even from a home IP (live test H); 3: 3-6 s cold start; 4: #507 on Fluid Compute |
 | Cloudflare Browser Run | **SKIP** | "always identified as bot traffic" |
 | Jina Reader | **SKIP** | worked once in 8.7 s (> budget); vendor says it does not bypass protection — luck, not a service |
 | Affiliate feeds, seller APIs, aggregators, Google CSE, Bing | **SKIP** | not available (dead domain, no per-URL lookup, closed, retired) |
@@ -268,34 +312,43 @@ Criteria numbers refer to the list at the top.
 
 ## Recommendation
 
+Revised 2026-09-23 after the owner's position and the live tests (section H). The first version
+recommended stopping short of any real browser. It is kept in git history.
+
 A plain fetch already reaches the long tail our users actually paste: of 34 saved links, 28 are
 small shops that answer `200` (27 saved with a price), 3 are Instagram (a login wall, a different
-problem) and 3 are Rozetka (all without a price). Among the 30 big shops, the 7 open ones we
-tested all returned a card from markup alone (ktc.ua with a wrong rules-only price, which the
-model step exists to fix). The wall is real but narrow — 13 of 30 big shops, led by Rozetka — so
-the fix should be narrow too, and must not cross the circumvention line for a personal project.
+problem) and 3 are Rozetka (all without a price). The wall is 13 of 30 big shops. A real Chrome
+with a window got through all 7 walls tested, in 1-3 s. So the design is: keep the cheap fetch
+first, and send only walled links to a real browser.
 
-1. **Tell a wall from a missing page** (`cf-mitigated: challenge`, `x-amzn-waf-action`,
-   `403`/`429`/`503` from a WAF, `2xx` with an empty body). A wall is its own outcome: the model
-   is never called on an empty page, and `readPrice` never accepts an unchecked price when the
-   page text is empty. Free, and it closes the makeup.com.ua bug today.
-2. **On a wall, ask a search API** for the product ID or URL and hand the result title and
-   snippet to the *existing* ADR 0006 model step as the "page" — its price check then works
-   against the snippet's own prices. Brave first (the free credit recurs monthly; the hand test
-   was on its index), Serper as the second source. Before adopting: a 20-link spike across
-   Rozetka, Comfy, Kasta, Brain measuring name / price / photo, and a rule for stale prices
-   (the snippet can be months old — probably show the price as «приблизно» or drop it).
-3. **If search misses too, ask honestly** — one `notice` line, no 💜, in `src/text.ts`, e.g.
-   «Магазин не пускає мене подивитись 😕 Напиши назву — або надішли знімок екрана з товаром»
-   (draft; "скриншот" fails the grandmother test). The picture goes through a vision call to
-   fill name and price.
-4. **Do not** run our own stealth browser or pay an unlocker to solve challenges.
+1. **Tell a wall from a missing page.** Watch for `cf-mitigated: challenge`, `x-amzn-waf-action`,
+   `403`/`429`/`503` from a WAF, and a `2xx` with an empty body (#20). The model is never called
+   on an empty page. In the same change, **send browser headers instead of `WishlistBot`** —
+   that opens answear and watsons for free.
+2. **A small page-reader service with a real Chrome.** Chrome runs with a window (on a server,
+   under a virtual display) and stays open between requests. It exposes one endpoint: URL in,
+   rendered HTML out, protected by a secret token. It must reuse the same public-address checks
+   as `assertPublicUrl`, because an endpoint that opens any URL is an obvious way into a private
+   network. The bot calls it **only after step 1 saw a wall**, and its HTML goes through the
+   existing ADR 0006 path unchanged. Timeout ~5 s, so a slow reader still leaves the whole lookup
+   inside the 8 s budget.
+3. **Where it runs is the one open question. One test settles it:** run `probe.mjs` (with a
+   window, under a virtual display) on a small VPS.
+   - Passes → host the reader there: always on, a few euros a month (price not checked).
+   - Fails (the datacenter IP is the problem) → run the same reader on an always-on machine at
+     home, reached through a tunnel. This is the setup proven today. Or switch it to a paid
+     unlocker API (Bright Data's free tier, if its 5 000/month holds). The bot does not care
+     which one answers.
+4. **The link always works, whatever happens above.** If the reader is down or also blocked, the
+   bot asks the person — one `notice` line, no 💜, in `src/text.ts`, e.g. «Магазин не пускає мене
+   подивитись 😕 Напиши назву — або надішли знімок екрана з товаром». The picture goes through a
+   vision call. The search API (E) stays in reserve as an extra automatic step, if the reader
+   proves flaky.
 
-Before any of this: paste one Rozetka link into a Telegram chat by hand (1 minute). If a full
-preview appears, the MTProto path (D) earns a 30-minute experiment; if not, it is closed.
+The Telegram preview (D) is optional: the flow above works without it.
 
-This settles a direction that constrains future work, so once the owner agrees it becomes an
-ADR citing this report (`/write-adr`).
+This settles a direction that constrains future work. Once the owner agrees, it becomes an ADR
+citing this report (`/write-adr`).
 
 ## Not investigated
 
