@@ -328,6 +328,20 @@ A cold call — boot, Chrome, then a ~1.7 s page — lands at **roughly 6-8 s**.
 lookup budget spent before the model even starts. The spike's round-trips (file upload, an extra
 `curl`) inflate the total, so a lean version will be faster. How much faster was not measured.
 
+**Repeat run, same day: the Vercel result is an IP lottery.** Two more `fra1` boots, windowed
+Chrome, Comfy / Notino / Rozetka:
+
+| Boot | Egress IP | comfy | notino | rozetka |
+|---|---|---|---|---|
+| probe run above | 18.x (one of the three boot IPs) | `403` | `403` | **`200`** |
+| rotate 1 | 3.68.183.141 | `403` | `403` | `403` |
+| rotate 2 | 18.185.87.37 | `403` | **`200`** | `403` |
+
+Across three boots: Rozetka 1/3, Notino 1/3, Comfy 0/3. The "5 of 7 from Vercel" above came from
+one lucky address. On Vercel's IPs, a sandbox browser is a partial layer, not a solution.
+Snapshots are region-bound ("The snapshot is available in `fra1`…"), so other regions were not
+tested. Building the rotation any further was stopped by this session's permission guard.
+
 Cost on Pro: billed per CPU and memory time. The sweep's estimate is under ~$1/month at our
 volume ([pricing](https://vercel.com/docs/sandbox/pricing), read 2026-09-10 by the sweep). Not
 re-checked against the Pro plan's included usage.
@@ -342,7 +356,7 @@ Criteria numbers refer to the list at the top.
 | Search API by product ID (Brave first) as the automatic fallback | **STEAL — reserve, after a 20-link spike** | 1: the one test named the product right; 2: recurring free tier covers us; 3: 1-2 s per call (vendor claim, not measured); 4: one `fetch`; 5: clean. Price accuracy unproven |
 | Screenshot → model | **STEAL — last layer** | 1: covers every wall incl. Instagram; 2: ≈ $0.0006; 5: clean. Costs the person a step |
 | Browser headers instead of the `WishlistBot` User-Agent | **STEAL — with step one** | 1: +2 of 13 blocked shops, measured; 2-4: free, a header change |
-| Windowed Chrome in a Vercel Sandbox, called only on a wall | **STEAL — second** | 1: 5 of 7 walls from Vercel, Rozetka with a price (live test I); 2: under ~$1/month on Pro (estimate); 4: our code, Vercel we already use, no machine of ours. But 3: 6-8 s cold, so the card has to be filled after the first screen (see recommendation) |
+| Windowed Chrome in a Vercel Sandbox, called only on a wall | **INTERESTING BUT HEAVY — owner's call** | 1: an IP lottery on Vercel (Rozetka 1/3 boots, Comfy 0/3, live test I); 3: 6-8 s cold, so it only works filled in after the first screen. 2, 4: cheap, and no machine of ours. It becomes a real layer only with clean IPs, which is the proxy decision |
 | Paid unlocker (Bright Data / Zyte) | **INTERESTING BUT HEAVY — backup to the own browser** | 1: 90-95 % in third-party tests; 2: fits a free tier; 4: no machine to keep alive. But 3: p95 far over 8 s; an outside dependency for a job our own browser did in 1 s |
 | Web Bot Auth / Verified Bots | **INTERESTING BUT HEAVY** | 5: the honest direction; but 1: does not open Rozetka's custom rule. Changes if big shops start exempting signed agents |
 | Telegram preview via MTProto `getMessages` | **INTERESTING BUT HEAVY** | 3-4: MTProto session in a function; 1: unknown. Killed outright if a hand-pasted Rozetka link shows no preview in Telegram |
