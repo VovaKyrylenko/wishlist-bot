@@ -31,7 +31,7 @@ link arrives (F3)
     └─ L0 plain fetch, browser headers, ≤ 8 s budget (as today)
        ├─ page read → ADR 0006 model → draft card                   ~1-4 s   DONE
        ├─ not a page (404, not HTML, bad address) → «Не зміг відкрити…», ask the name   DONE
-       └─ WALL (cf-mitigated / x-amzn-waf-action / 403·429·503 from a WAF / 2xx with an empty body)
+       └─ WALL (cf-mitigated / x-amzn-waf-action / a plain 403 / 2xx with an empty body; 429 and 503 are "failed")
           ├─ draft saved: url, store (host); readingSince = now
           ├─ screen (same message): «Магазин не пускає одразу — дивлюся уважніше…»
           │   + the name question armed (draft.title), so typing a name works at once
@@ -96,11 +96,14 @@ flow already uses.
 ## Phases — each is one pull request, each has a checkable "done"
 
 1. **Wall detection and browser headers** (#20).
-   - Done when `cf-mitigated: challenge`, `x-amzn-waf-action`, and a `2xx` with an empty body each
-     come back as "blocked", with a fixture test each.
-   - Done when the model is never called on an empty page, and `readPrice` rejects an unchecked
-     price when the page text is empty.
-   - Done when requests carry browser headers instead of `WishlistBot`.
+   - Done when `cf-mitigated: challenge`, `x-amzn-waf-action`, a plain `403` (olx.ua's CloudFront
+     wall) and a `2xx` with an empty body each come back as "blocked", with a fixture test each,
+     and `429`/`503` stay "failed" — a shop that is down must not boot the browser (design log
+     `docs/design/objections/fix/wall-detection.md`, OBJ-2).
+   - Done when the model is never called on an empty page, and a model price for a page that
+     states no priced amount is accepted only when that number appears on the page (OBJ-1).
+   - Done when requests carry browser headers instead of `WishlistBot` (no `sec-fetch-*`: Node's
+     fetch rewrites them, OBJ-4).
    - Done when typecheck, lint, unit tests and `verify:flows` are green.
 2. **Page reader.** `readWalledPage(url)` in `src/lib/page-reader.ts`, the snapshot table, the
    cron rebuild and the off switch.
