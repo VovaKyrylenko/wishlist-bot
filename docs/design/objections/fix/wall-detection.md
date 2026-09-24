@@ -41,7 +41,7 @@ protocol deviation, stated plainly: round 1 prompts handed the Constraints by pa
       check: pnpm run verify:scrape
 - [ ] verify:flows is green (it never pastes a link, so it guards against regressions elsewhere only).
       check: pnpm run verify:flows
-      status: UNKNOWN — not run, no staging database configured locally (OBJ-5, accepted-risk)
+      status: UNKNOWN — run once at d1af6fd; the harness refused `neondb` (exit 1) in assertStaging before any flow step or database write; a staging DATABASE_URL is needed for a verdict (OBJ-5, accepted-risk)
 - [ ] answear.ua and watsons.ua open with the final header set: one home page and one product page each, recorded (OBJ-4).
       manual: re-measure before merge; results in docs/verification/fix/wall-detection.md
 
