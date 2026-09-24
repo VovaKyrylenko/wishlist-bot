@@ -178,7 +178,9 @@ describe("fetchLinkPreview - a wall is not a page (#20)", () => {
 
   it.each([
     ["Cloudflare's challenge", reply("<html><title>Just a moment...</title></html>", 403, { "cf-mitigated": "challenge", "content-type": "text/html" }), "cloudflare", 403],
-    ["AWS WAF's empty 202 (makeup.com.ua)", reply("", 202, { "x-amzn-waf-action": "challenge", "content-type": "text/html" }), "aws-waf", 202],
+    // makeup.com.ua sends ~2 KB of challenge script to a browser-like request, so
+    // the header, not the body, is what has to catch it.
+    ["AWS WAF's 202 (makeup.com.ua)", reply("<html><script>challenge()</script></html>", 202, { "x-amzn-waf-action": "challenge", "content-type": "text/html" }), "aws-waf", 202],
     ["a bare 403 (olx.ua's CloudFront wall)", reply("<html>ERROR</html>", 403, { "content-type": "text/html" }), "status", 403],
     ["a 200 with an empty HTML body", reply("", 200, { "content-type": "text/html" }), "empty", 200],
     ["a 200 with only whitespace and a BOM", reply("﻿  \n\t", 200, { "content-type": "text/html" }), "empty", 200],
@@ -216,6 +218,7 @@ describe("fetchLinkPreview - a wall is not a page (#20)", () => {
     ["a wall", 403, { "cf-mitigated": "challenge" }],
     ["a 404", 404, {}],
     ["a redirect with no Location", 302, {}],
+    ["a non-HTML file", 200, { "content-type": "application/pdf" }],
   ])("releases the body of %s instead of leaving the socket open", async (_name, status, headers) => {
     const { body, cancel } = watched();
     fetchMock.mockResolvedValue(new Response(body, { status, headers }));
@@ -234,7 +237,8 @@ describe("fetchLinkPreview - a wall is not a page (#20)", () => {
     fetchMock.mockResolvedValue(reply("<html><head><title>Ok</title></head><body>Ok</body></html>", 200, { "content-type": "text/html" }));
     await fetchLinkPreview(SHOP);
     const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
-    expect(headers["User-Agent"]).toMatch(/Chrome\/\d+/);
+    // Pinned on purpose (see BROWSER_HEADERS); a change here should be a deliberate bump.
+    expect(headers["User-Agent"]).toMatch(/Chrome\/154\./);
     expect(headers["User-Agent"]).not.toMatch(/bot/i);
     expect(headers["Accept-Language"]).toMatch(/^uk-UA/);
     // Node rewrites sec-fetch-mode, so none of that group is sent (design log OBJ-4).

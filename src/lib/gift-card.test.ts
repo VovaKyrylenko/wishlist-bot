@@ -390,9 +390,20 @@ describe("a model price for a page that states no priced amount (#20)", () => {
     expect(priceFor(html, "1299")).toBeNull();
   });
 
+  it("keeps a price the markup wrote even when the body is empty", () => {
+    const html = body("", `<meta property="og:description" content="Сукня 1200">`);
+    expect(priceFor(html, "1200")?.amount).toBe(1200);
+  });
+
   it("keeps a price the caption wrote as a plain number", () => {
     expect(priceFor(body("<p>Сукня 1200</p>"), "1200")?.amount).toBe(1200);
     expect(priceFor(body("<p>Сукня 1 200</p>"), "1200")?.amount).toBe(1200);
+  });
+
+  // The page is read with the same number reader as the model's price, so a
+  // thousands dot or comma means the same thing on both sides.
+  it.each(["Ціна: 1.299", "Price: 1,299"])("reads %s the way parsePrice reads 1299", (caption) => {
+    expect(priceFor(body(`<p>${caption}</p>`), "1299")?.amount).toBe(1299);
   });
 
   // The number grammar reads "44 1200" as one grouped number, so this caption

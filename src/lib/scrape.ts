@@ -51,8 +51,8 @@ type Fetched =
   | { kind: "blocked"; finalUrl: URL; by: WallSign; status: number };
 
 /**
- * A normal Chrome's request. The old `compatible; WishlistBot/1.0` User-Agent
- * was refused outright by answear.ua and watsons.ua, which open for this set
+ * A normal Chrome's request. The old self-declared bot User-Agent was refused
+ * outright by answear.ua and watsons.ua, which open for this set
  * (measured 2026-09-23/24, docs/research/scraper-bot-protection.md).
  *
  * No `sec-fetch-*`: Node's fetch rewrites `sec-fetch-mode` to "cors", and

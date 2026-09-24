@@ -125,6 +125,19 @@ function findNumbers(text: string): { raw: string; start: number; end: number }[
   return found;
 }
 
+/**
+ * Every number a text states, read exactly as `parsePrice` reads one — so a
+ * number found here and a price parsed there can be compared as equals.
+ */
+export function amountsIn(text: string): number[] {
+  const amounts = new Set<number>();
+  for (const { raw } of findNumbers(text)) {
+    const amount = parseAmount(raw);
+    if (amount !== null) amounts.add(amount);
+  }
+  return [...amounts];
+}
+
 export interface ParseOptions {
   /**
    * Only accept a number that sits next to a currency. Used for the DOM

@@ -18,7 +18,7 @@
 // same shape as scripts/release/notes.ts.
 
 import * as cheerio from "cheerio";
-import { formatPrice, isPlausibleAmount, parsePrice, type StructuredPrice } from "./price.js";
+import { amountsIn, formatPrice, isPlausibleAmount, parsePrice, type StructuredPrice } from "./price.js";
 import type { LinkPreview } from "./scrape.js";
 
 const GATEWAY = process.env.AI_GATEWAY_URL ?? "https://ai-gateway.vercel.sh/v1";
@@ -158,18 +158,6 @@ export interface PageContext {
   numbers: number[];
 }
 
-const NUMBER_IN_TEXT = new RegExp(NUMBER_TOKEN, "g");
-
-/** "1 299", "1299" and "1299.00" all read as 1299, the way parsePrice reads them. */
-function numbersIn(text: string): number[] {
-  const found = new Set<number>();
-  for (const match of text.matchAll(NUMBER_IN_TEXT)) {
-    const value = Number(match[0].replace(/[\s  ']/g, "").replace(",", "."));
-    if (Number.isFinite(value)) found.add(value);
-  }
-  return [...found];
-}
-
 /** The entities a shop page actually uses, and numeric ones as a catch-all. */
 const ENTITY = /&(?:#(\d+)|#x([0-9a-f]+)|(nbsp|amp|lt|gt|quot|apos|laquo|raquo|mdash|ndash|hellip|deg|times));/gi;
 const NAMED_ENTITIES: Record<string, string> = {
@@ -260,7 +248,7 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
     $('meta[property="og:description" i]').attr("content"),
     $('meta[name="description" i]').attr("content"),
   ].filter(Boolean);
-  const numbers = numbersIn([text, ...markup].join(" "));
+  const numbers = amountsIn([text, ...markup].join(" "));
 
   const prompt = [
     `Адреса: ${url.toString()}`,
@@ -440,8 +428,9 @@ function readPrice(parsed: ModelAnswer, context: PageContext): StructuredPrice |
   // A page with no priced amount of its own (a caption, a photo post) has no
   // price list to check against, but the number must still be one the page
   // wrote: a loading screen or a cookie banner once got 1 299 ₴ out of nowhere
-  // (#20). «Сукня 1200» keeps its price; a wrong-but-real number (a year, the
-  // 256 in "8/256") can still slip through, which is narrower than before.
+  // (#20). «Сукня 1200» keeps its price. A wrong-but-real number (a year, a
+  // size) can still slip through, which is narrower than before; numbers the
+  // page runs together ("44 1200") read as one and the price is dropped.
   if (context.prices.length === 0) {
     if (!context.numbers.includes(price.amount)) return null;
     return { text: formatPrice(price), amount: price.amount, currency: price.currency };
