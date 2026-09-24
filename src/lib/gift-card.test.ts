@@ -390,6 +390,10 @@ describe("a model price for a page that states no priced amount (#20)", () => {
     expect(priceFor(html, "1299")).toBeNull();
   });
 
+  it("does not glue the body's last number to the title's first", () => {
+    expect(priceFor(body("<p>Модель 12</p>", "<title>345 Крем</title>"), "12345")).toBeNull();
+  });
+
   it("keeps a price the markup wrote even when the body is empty", () => {
     const html = body("", `<meta property="og:description" content="Сукня 1200">`);
     expect(priceFor(html, "1200")?.amount).toBe(1200);

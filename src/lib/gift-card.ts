@@ -248,7 +248,9 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
     $('meta[property="og:description" i]').attr("content"),
     $('meta[name="description" i]').attr("content"),
   ].filter(Boolean);
-  const numbers = amountsIn([text, ...markup].join(" "));
+  // Each part on its own: joined, a body ending in "12" and a title starting
+  // with "345" read as one number the page never wrote.
+  const numbers = [...new Set([text, ...markup].flatMap((part) => amountsIn(part ?? "")))];
 
   const prompt = [
     `Адреса: ${url.toString()}`,
