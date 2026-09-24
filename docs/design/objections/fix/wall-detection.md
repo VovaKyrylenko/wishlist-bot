@@ -41,6 +41,7 @@ protocol deviation, stated plainly: round 1 prompts handed the Constraints by pa
       check: pnpm run verify:scrape
 - [ ] verify:flows is green (it never pastes a link, so it guards against regressions elsewhere only).
       check: pnpm run verify:flows
+      status: UNKNOWN — not run, no staging database configured locally (OBJ-5, accepted-risk)
 - [ ] answear.ua and watsons.ua open with the final header set: one home page and one product page each, recorded (OBJ-4).
       manual: re-measure before merge; results in docs/verification/fix/wall-detection.md
 
@@ -78,7 +79,7 @@ BAR:        Drop sec-fetch-mode, or assert against what a local server received.
 HISTORY:    r1 open (adversary) -> r1 proposed (advocate: drop the whole sec-fetch-* group — we cannot send it faithfully — and keep User-Agent, Accept, Accept-Language, sec-ch-ua*, upgrade-insecure-requests. Because this departs from the measured set, answear.ua and watsons.ua are re-measured with the final set before merge and the result recorded in docs/verification; if either stops opening, the set is revisited. The unit test asserts only headers fetch does not rewrite (User-Agent, Accept-Language).)
             -> r1d verified (delta-adversary: scratchpad/d3.mjs without sec-fetch-* — answear.ua 200 369 KB, watsons.ua 200 476 KB, with Chrome 154 and 140, home IP, home pages. Condition: the pre-merge re-measure adds one product page per shop and is recorded.)
 
-[OBJ-5] severity: minor | status: proposed
+[OBJ-5] severity: minor | status: accepted-risk
 CLAIM:      Criteria drop the bound's verify:flows item; the grep can pass with the UA moved; no test at buildDraftFromUrl; content-type check precedes the empty-body rule.
 EVIDENCE:   Bound phase 1 "Done"; criterion 4's grep is scrape.ts only; gifts.ts:253-254 untested; plan §1 order.
 SCENARIO:   All green while the UA ships from another file or an empty 2xx walks the old path.
@@ -86,7 +87,8 @@ BAR:        Run verify:flows; grep all of src/ and api/; a unit test for the cal
 HISTORY:    r1 open (adversary) -> r1 proposed (advocate: (a) verify:flows is run and recorded, with the note that it never pastes a link; (b) criterion 4's grep covers src/ and api/; (c) the caller's mapping moves into an exported pure helper `draftFromLookup(url, result)` in gifts.ts with a unit test that a blocked and a failed result both give `{ url }`; (d) a 2xx with Content-Length 0 or an empty stream is "blocked/empty" whatever its content-type; a non-HTML 2xx with a body stays "failed".)
             -> r1d verified (delta-adversary: blocked and failed both map to { url } and the name question, gifts.ts:298, C4 holds. Condition for D9: read the first chunk before cancelling a non-HTML 2xx; a 204 comes out blocked/empty.)
             -> review-ledger reopened (part (a) "verify:flows is run and recorded" did not happen: the harness refuses any database without "staging" in its name, scripts/flows/harness.ts:212, and only `neondb` is configured locally)
-            -> advocate proposes accepted-risk (bound: verify:flows never pastes a link, scripts/flows/core.ts:174; the only change in gifts.ts is the draftFromLookup extraction, pinned by src/features/gifts.test.ts; the criterion ships as UNKNOWN, not green) — pending confirmation by the review pass
+            -> advocate proposes accepted-risk (bound: verify:flows never pastes a link as a new gift — scripts/flows/core.ts:174 sends a URL only as an edit of a saved gift's link field, which goes through normalizeUrl and never reaches fetchLinkPreview; the only change in gifts.ts is the draftFromLookup extraction, pinned by src/features/gifts.test.ts; the criterion ships as UNKNOWN, not green) — pending confirmation by the review pass
+            -> review-ledger r2 accepted-risk (confirmed: harness.ts:212 refuses neondb; the link path is startGiftFromInput -> buildDraftFromUrl, gifts.ts:296, which no flow reaches; draftFromLookup pinned by gifts.test.ts. Consequence accepted: a regression elsewhere in the bot flows goes unseen until verify:flows runs against a staging database.)
 
 [OBJ-6] severity: minor | status: verified
 CLAIM:      With hasText gating the model, verify:scrape's "no key -> no call" check passes for the wrong reason.
@@ -148,4 +150,6 @@ Fresh-eyes findings (no blocker, no major):
 - REVIEW-F2 (minor): the BROWSER_HEADERS comment cites docs/research/scraper-bot-protection.md, which lands with PR #21. Handled by merge order: PR #21 merges first (stated in this PR's body).
 - REVIEW-F3 (note, pre-existing): a page with no currency still takes the model's currency unchecked ("Сукня 1200" answered as USD). Out of scope; filed as a separate issue.
 - REVIEW-F4 (note): makeup.com.ua sends ~2 KB of challenge script to a browser-like request, so the header — not the empty body — catches it. Fixed: the aws-waf fixture now has a non-empty body.
+
+Review pass round 2 (ledger, 2026-09-24): OBJ-5 confirmed accepted-risk; REVIEW-L1..L5, F1, F4 confirmed fixed with the failing-mutation evidence; OBJ-1's carried conditions hold after the switch to amountsIn. One note acted on: joining the visible text and the markup before reading numbers glued "Модель 12" + "<title>345" into 12345 — each part is now read separately, pinned by a test.
 
