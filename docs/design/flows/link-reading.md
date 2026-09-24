@@ -110,8 +110,8 @@ flow already uses.
 3. **Background fill.** `readingSince` / `screenMessageId` on the draft, the merge rules, the
    texts, and `waitUntil` in the link path.
    - Done when `verify:flows` covers the five rows of the race table.
-   - Done when a link sent in answer to any draft text question starts a new gift instead of
-     becoming that field's value.
+   - Done when a link sent in answer to a draft text question (except the link question
+     itself, `draft.url`) starts a new gift instead of becoming that field's value.
 4. **Search API layer.** Needs the owner to register a Brave Search API key.
    - Done when a walled link the browser could not open still gets a name.
 5. **Reading a screenshot.** A photo sent as a gift gets its name and price read by a vision
