@@ -76,10 +76,19 @@ edits a screen only while `user.screenMessageId === draft.screenMessageId`.
   An AWS WAF `202` gets the long wait, because it does clear.
 - **Output:** the rendered HTML, read back with `readFileToBuffer`, goes through the existing
   `parseLinkPreview` → `buildPageContext` → `suggestGiftCard` → `applyGiftCard` path unchanged.
-- **Snapshots:** one per region (fra1, cdg1, lhr1 — the cleanest addresses in the rotation run).
-  Each is ~960 MB and **expires after 30 days by default**. IDs live in a `ReaderSnapshot` table.
-  The hourly cron rebuilds at most one region per run when its snapshot is missing or expires
-  within 7 days. That also keeps Chrome current.
+- **Snapshots:** one persistent, named builder sandbox per region — `page-reader-fra1`,
+  `page-reader-cdg1`, `page-reader-lhr1` (the cleanest addresses in the rotation run). Its
+  snapshots are the reader's image, found with `Snapshot.list({ name })`, newest first — so no
+  database table and no migration. Measured 2026-09-24: deleting a named sandbox makes its
+  snapshots unfindable by name, so the builders are never deleted, only stopped.
+  Snapshots are created with no expiry and the builder keeps its last two
+  (`keepLastSnapshots`); the hourly cron rebuilds at most one region per run when its newest
+  snapshot is missing or older than 7 days (resume the builder, upgrade Chrome, snapshot). A
+  broken cron therefore ages the image instead of deleting it. ~1 GB per snapshot, ~6 GB total.
+- **Reader sandboxes are disposable:** `persistent: false`, deleted after every read. Measured
+  2026-09-24: a sandbox is persistent by default and a persistent sandbox snapshots its disk on
+  stop — the spikes left 39 stopped sandboxes and 38 GB of snapshots behind before this was
+  caught and cleaned up.
 - **Off switch:** `PAGE_READER=off` skips L1 entirely; the person layer still works.
 
 ## Texts (draft, final wording in `src/text.ts`)
@@ -105,11 +114,12 @@ flow already uses.
    - Done when requests carry browser headers instead of `WishlistBot` (no `sec-fetch-*`: Node's
      fetch rewrites them, OBJ-4).
    - Done when typecheck, lint, unit tests and `verify:flows` are green.
-2. **Page reader.** `readWalledPage(url)` in `src/lib/page-reader.ts`, the snapshot table, the
-   cron rebuild and the off switch.
+2. **Page reader** (#25). `readWalledPage(url)` in `src/lib/page-reader.ts`, the named builders
+   and their snapshots, the cron rebuild and the off switch.
    - Done when, called from a deployed preview, it reads the Rozetka test product in at least
      3 of 4 tries within 30 s.
-   - Done when a missing snapshot is rebuilt by the cron without a person.
+   - Done when a missing or week-old snapshot is rebuilt by the cron without a person.
+   - Done when a read leaves no sandbox and no snapshot behind.
 3. **Background fill.** `readingSince` / `screenMessageId` on the draft, the merge rules, the
    texts, and `waitUntil` in the link path.
    - Done when `verify:flows` covers the five rows of the race table.
