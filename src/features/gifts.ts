@@ -11,7 +11,7 @@ import { InlineKeyboard, type Bot } from "grammy";
 import type { MyContext } from "../context.js";
 import { prisma } from "../db.js";
 import { currentUser } from "../lib/users.js";
-import { fetchLinkPreview } from "../lib/scrape.js";
+import { fetchLinkPreview, type LinkLookup } from "../lib/scrape.js";
 import { computeAvailability, holdingReservations } from "../lib/availability.js";
 import { escapeHtml, isHttpUrl, normalizeUrl, PRIORITY_NAME } from "../lib/format.js";
 import { structurePrice } from "../lib/price.js";
@@ -250,23 +250,32 @@ async function buildDraftFromUrl(ctx: MyContext, url: string): Promise<DraftFiel
   }, SLOW_SCRAPE_MS);
 
   try {
-    const preview = await fetchLinkPreview(url);
-    if (!preview?.title) return { url };
-    return {
-      url,
-      title: truncate(preview.title, MAX_TITLE_LENGTH),
-      imageUrl: preview.imageUrl,
-      price: preview.price,
-      priceAmount: preview.priceAmount,
-      priceCurrency: preview.priceCurrency,
-      store: preview.store,
-      // What the shop says the thing is, in one or two sentences. The owner
-      // sees it on the draft screen and can rewrite or clear it before saving.
-      comment: preview.description,
-    };
+    return draftFromLookup(url, await fetchLinkPreview(url));
   } finally {
     clearTimeout(slowTimer);
   }
+}
+
+/**
+ * A wall and a dead link end the same way for now: the link is kept and the
+ * person is asked for the name. The two stay apart in `LinkLookup` because only
+ * a wall is worth sending a real browser after.
+ */
+export function draftFromLookup(url: string, result: LinkLookup): DraftFields {
+  const preview = result.kind === "card" ? result.preview : null;
+  if (!preview?.title) return { url };
+  return {
+    url,
+    title: truncate(preview.title, MAX_TITLE_LENGTH),
+    imageUrl: preview.imageUrl,
+    price: preview.price,
+    priceAmount: preview.priceAmount,
+    priceCurrency: preview.priceCurrency,
+    store: preview.store,
+    // What the shop says the thing is, in one or two sentences. The owner
+    // sees it on the draft screen and can rewrite or clear it before saving.
+    comment: preview.description,
+  };
 }
 
 /**

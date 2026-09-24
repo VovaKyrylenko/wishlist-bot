@@ -27,6 +27,8 @@ const noContext = (over: Partial<PageContext> = {}): PageContext => ({
   prompt: "",
   images: [],
   prices: [],
+  hasText: true,
+  numbers: [],
   ...over,
 });
 
@@ -367,5 +369,67 @@ describe("suggestGiftCard", () => {
 
     fetchSpy.mockRestore();
     delete process.env.AI_GATEWAY_API_KEY;
+  });
+});
+
+describe("a model price for a page that states no priced amount (#20)", () => {
+  const SHOP = new URL("https://shop.example/p/1");
+  const answer = (price: string) =>
+    `{"name":"Подарунок","price":"${price}","currency":"UAH","description":null,"image":null}`;
+  const priceFor = (html: string, price: string) => readAnswer(answer(price), buildPageContext(html, SHOP, null))?.price ?? null;
+  const body = (inner: string, head = "") => `<html><head>${head}</head><body>${inner}</body></html>`;
+
+  // The four near-empty pages the design round reproduced: 1299 appears on none of them.
+  it.each([
+    ["an empty page", body("")],
+    ["an app shell with only og markup", body(`<div id="app"></div>`, `<meta property="og:title" content="Крем">`)],
+    ["a loading line", body("<div id='app'>Завантаження…</div>")],
+    ["a cookie banner", body("<p>Ми використовуємо cookies, щоб сайт працював краще.</p>")],
+    ["an empty body whose og:description has no number", body("", `<meta property="og:description" content="Живильний крем для рук">`)],
+  ])("drops a price that %s never wrote", (_name, html) => {
+    expect(priceFor(html, "1299")).toBeNull();
+  });
+
+  it("does not glue the body's last number to the title's first", () => {
+    expect(priceFor(body("<p>Модель 12</p>", "<title>345 Крем</title>"), "12345")).toBeNull();
+  });
+
+  it("keeps a price the markup wrote even when the body is empty", () => {
+    const html = body("", `<meta property="og:description" content="Сукня 1200">`);
+    expect(priceFor(html, "1200")?.amount).toBe(1200);
+  });
+
+  it("keeps a price the caption wrote as a plain number", () => {
+    expect(priceFor(body("<p>Сукня 1200</p>"), "1200")?.amount).toBe(1200);
+    expect(priceFor(body("<p>Сукня 1 200</p>"), "1200")?.amount).toBe(1200);
+  });
+
+  // The page is read with the same number reader as the model's price, so a
+  // thousands dot or comma means the same thing on both sides.
+  it.each(["Ціна: 1.299", "Price: 1,299"])("reads %s the way parsePrice reads 1299", (caption) => {
+    expect(priceFor(body(`<p>${caption}</p>`), "1299")?.amount).toBe(1299);
+  });
+
+  // The number grammar reads "44 1200" as one grouped number, so this caption
+  // loses its price. That errs toward no price, which is the safe side.
+  it("drops the price when the page's numbers run together", () => {
+    expect(priceFor(body("<p>розмір 44 1200</p>"), "1200")).toBeNull();
+  });
+
+  it("marks a page with no visible text so the model is not asked", () => {
+    expect(buildPageContext(body(""), SHOP, null).hasText).toBe(false);
+    expect(buildPageContext(body("<p>Сукня</p>"), SHOP, null).hasText).toBe(true);
+  });
+
+  it("does not ask the model about an empty page even with a key", async () => {
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    const spy = vi.spyOn(globalThis, "fetch");
+    try {
+      expect(await suggestGiftCard(buildPageContext(body(""), SHOP, null))).toBeNull();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      delete process.env.AI_GATEWAY_API_KEY;
+    }
   });
 });
