@@ -41,7 +41,7 @@ vi.mock("./home.js", async (importOriginal) => {
   return { ...actual, renderHome: renderHomeSpy };
 });
 
-import { applyGiftAnswer } from "./gifts.js";
+import { applyGiftAnswer, draftFromLookup } from "./gifts.js";
 
 function fakeCtx(text: string): MyContext {
   return { message: { text }, callbackQuery: undefined } as unknown as MyContext;
@@ -74,5 +74,41 @@ describe("applyGiftAnswer — editing a draft field", () => {
 
     expect(handled).toBe(true);
     expect(renderHomeSpy).toHaveBeenCalledWith(expect.anything(), 0, { notice: t.common.draftGone });
+  });
+});
+
+describe("draftFromLookup — what a pasted link leaves in the draft", () => {
+  const URL_ = "https://rozetka.com.ua/ua/p547497342/";
+  const preview = {
+    title: "Настільна гра Бункер",
+    imageUrl: "https://img.example/1.jpg",
+    price: "799 ₴",
+    priceAmount: 799,
+    priceCurrency: "UAH",
+    store: "rozetka.com.ua",
+    description: "Гра для компанії.",
+  };
+
+  // A wall and a dead link both keep the link and ask for the name (C4: the bot
+  // never goes silent); only the card path fills anything in.
+  it.each([
+    ["a wall", { kind: "blocked", host: "rozetka.com.ua", by: "cloudflare", status: 403 } as const],
+    ["a failed lookup", { kind: "failed" } as const],
+    ["a card with no name", { kind: "card", preview: { ...preview, title: null } } as const],
+  ])("keeps only the link for %s", (_name, result) => {
+    expect(draftFromLookup(URL_, result)).toEqual({ url: URL_ });
+  });
+
+  it("fills the draft from a card", () => {
+    expect(draftFromLookup(URL_, { kind: "card", preview })).toEqual({
+      url: URL_,
+      title: "Настільна гра Бункер",
+      imageUrl: "https://img.example/1.jpg",
+      price: "799 ₴",
+      priceAmount: 799,
+      priceCurrency: "UAH",
+      store: "rozetka.com.ua",
+      comment: "Гра для компанії.",
+    });
   });
 });

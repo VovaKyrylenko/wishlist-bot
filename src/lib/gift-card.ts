@@ -149,6 +149,25 @@ export interface PageContext {
    * currency.
    */
   prices: { amount: number; currency: string | null }[];
+  /** False for an empty or tag-only page: there is nothing for a model to read. */
+  hasText: boolean;
+  /**
+   * Every plain number the page wrote — visible text, <title>, og:title,
+   * og:description — for a page that states no priced amount at all.
+   */
+  numbers: number[];
+}
+
+const NUMBER_IN_TEXT = new RegExp(NUMBER_TOKEN, "g");
+
+/** "1 299", "1299" and "1299.00" all read as 1299, the way parsePrice reads them. */
+function numbersIn(text: string): number[] {
+  const found = new Set<number>();
+  for (const match of text.matchAll(NUMBER_IN_TEXT)) {
+    const value = Number(match[0].replace(/[\s  ']/g, "").replace(",", "."));
+    if (Number.isFinite(value)) found.add(value);
+  }
+  return [...found];
 }
 
 /** The entities a shop page actually uses, and numeric ones as a catch-all. */
@@ -234,6 +253,14 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
   }
   remember(facts?.priceAmount, facts?.priceCurrency ?? null);
 
+  const markup = [
+    facts?.title,
+    $("title").first().text(),
+    $('meta[property="og:title" i]').attr("content"),
+    $('meta[property="og:description" i]').attr("content"),
+    $('meta[name="description" i]').attr("content"),
+  ].filter(Boolean);
+  const numbers = numbersIn([text, ...markup].join(" "));
 
   const prompt = [
     `Адреса: ${url.toString()}`,
@@ -253,7 +280,7 @@ export function buildPageContext(html: string, url: URL, facts: LinkPreview | nu
     `"""\n${text.slice(0, MAX_TEXT_CHARS)}\n"""`,
   ].join("\n");
 
-  return { prompt, images, prices };
+  return { prompt, images, prices, hasText: text.length > 0, numbers };
 }
 
 // Ukrainian, because the model answers in the language it is addressed in and
@@ -326,7 +353,10 @@ export async function suggestGiftCard(
   options: { timeoutMs?: number } = {},
 ): Promise<GiftCardSuggestion | null> {
   const key = process.env.AI_GATEWAY_API_KEY;
-  if (!key || !context.prompt.trim()) return null;
+  // A page with no visible text still has a prompt (the URL line), so the
+  // prompt is the wrong thing to test: with nothing to read, the model can only
+  // guess from the address, and its guesses land on a gift as fact (#20).
+  if (!key || !context.hasText) return null;
 
   // The caller owns the whole lookup's budget; asking with a second left would
   // only spend money on an answer that cannot arrive in time.
@@ -407,9 +437,13 @@ function readPrice(parsed: ModelAnswer, context: PageContext): StructuredPrice |
   const price = parsePrice(`${rawPrice} ${rawCurrency}`);
   if (!price || !isPlausibleAmount(price.amount)) return null;
 
-  // A page with no price of its own (a caption, a photo post) leaves nothing to
-  // check against; there the model's reading is all we have.
+  // A page with no priced amount of its own (a caption, a photo post) has no
+  // price list to check against, but the number must still be one the page
+  // wrote: a loading screen or a cookie banner once got 1 299 ₴ out of nowhere
+  // (#20). «Сукня 1200» keeps its price; a wrong-but-real number (a year, the
+  // 256 in "8/256") can still slip through, which is narrower than before.
   if (context.prices.length === 0) {
+    if (!context.numbers.includes(price.amount)) return null;
     return { text: formatPrice(price), amount: price.amount, currency: price.currency };
   }
 

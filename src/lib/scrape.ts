@@ -31,6 +31,80 @@ export interface LinkPreview {
   description: string | null;
 }
 
+/** What gave a shop's answer away as a wall rather than a page. */
+export type WallSign = "cloudflare" | "aws-waf" | "status" | "empty";
+
+/**
+ * Three outcomes, not two: a shop hiding from bots is not the same as a page
+ * that does not exist, and the next layer (a real browser) is only worth
+ * starting for the first.
+ */
+export type LinkLookup =
+  | { kind: "card"; preview: LinkPreview }
+  | { kind: "blocked"; host: string; by: WallSign; status: number }
+  | { kind: "failed" };
+
+const FAILED: LinkLookup = { kind: "failed" };
+
+type Fetched =
+  | { kind: "page"; html: string; finalUrl: URL }
+  | { kind: "blocked"; finalUrl: URL; by: WallSign; status: number };
+
+/**
+ * A normal Chrome's request. The old `compatible; WishlistBot/1.0` User-Agent
+ * was refused outright by answear.ua and watsons.ua, which open for this set
+ * (measured 2026-09-23/24, docs/research/scraper-bot-protection.md).
+ *
+ * No `sec-fetch-*`: Node's fetch rewrites `sec-fetch-mode` to "cors", and
+ * "document" + "cors" is a pair no browser sends. Chrome 154 was the stable
+ * release when this was measured; a UA many versions old starts to look like a
+ * bot again, so bump it when shops that open today start answering 403.
+ */
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  // Ukrainian shops serve a Russian or English title otherwise, and the gift
+  // ends up in a language the user did not paste.
+  "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8",
+  "sec-ch-ua": '"Chromium";v="154", "Google Chrome";v="154", "Not?A_Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"macOS"',
+  "upgrade-insecure-requests": "1",
+};
+
+/**
+ * `cf-mitigated` and `x-amzn-waf-action` are what Cloudflare and AWS WAF put on
+ * a challenge, whatever its status (makeup.com.ua's is a 202). A bare 403 is
+ * here because olx.ua's CloudFront wall sends nothing else and a real browser
+ * gets through it. 429 and 503 are deliberately not walls: a shop that is down
+ * or rate-limiting must not send the next layer after it.
+ */
+function wallSign(res: Response): WallSign | null {
+  if (res.headers.get("cf-mitigated")?.toLowerCase() === "challenge") return "cloudflare";
+  if (res.headers.has("x-amzn-waf-action")) return "aws-waf";
+  if (res.status === 403) return "status";
+  return null;
+}
+
+/**
+ * An unread body keeps its socket open until the lookup's abort timer fires,
+ * on a warm instance that has already moved on — measured at the full timeout
+ * without this, a couple of milliseconds with it.
+ */
+async function discard(res: Response): Promise<void> {
+  await res.body?.cancel().catch(() => undefined);
+}
+
+/** True when the response carries no bytes at all; reads one chunk at most. */
+async function hasNoBody(res: Response): Promise<boolean> {
+  const reader = res.body?.getReader();
+  if (!reader) return true;
+  const { done, value } = await reader.read();
+  await reader.cancel().catch(() => undefined);
+  return done || !value || value.length === 0;
+}
+
 /**
  * One budget for the whole lookup, not per step: the fetch used to get 8 s on
  * *every* redirect hop, and the model's 5 s sat on top of that, so a slow shop
@@ -131,7 +205,7 @@ async function assertPublicUrl(url: URL): Promise<void> {
  * "follow"` would happily land on a public URL that bounces to
  * 169.254.169.254.
  */
-async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: string; finalUrl: URL } | null> {
+async function fetchHtml(startUrl: string, deadline: number): Promise<Fetched | null> {
   let current = new URL(startUrl);
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -143,32 +217,40 @@ async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: st
     const res = await fetch(current, {
       redirect: "manual",
       signal: AbortSignal.timeout(left),
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; WishlistBot/1.0; +https://t.me)",
-        Accept: "text/html,application/xhtml+xml",
-        // Ukrainian shops serve a Russian or English title otherwise, and the
-        // gift ends up in a language the user did not paste.
-        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.6",
-      },
+      headers: BROWSER_HEADERS,
     });
+
+    const sign = wallSign(res);
+    if (sign) {
+      await discard(res);
+      return { kind: "blocked", finalUrl: current, by: sign, status: res.status };
+    }
 
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
+      await discard(res);
       if (!location) return null;
-      await res.body?.cancel();
       current = new URL(location, current);
       continue;
     }
 
-    if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-      await res.body?.cancel();
+    if (!res.ok) {
+      await discard(res);
       return null;
     }
 
-    const bytes = await readCapped(res);
-    return { html: decodeHtml(bytes, contentType), finalUrl: current };
+    // A success with nothing in it is a challenge that did not say so, whatever
+    // content-type it claims; handing it on as a page is how an empty 202 once
+    // reached the model with nothing but a URL to go on (#20).
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+      const empty = await hasNoBody(res);
+      return empty ? { kind: "blocked", finalUrl: current, by: "empty", status: res.status } : null;
+    }
+
+    const html = decodeHtml(await readCapped(res), contentType);
+    if (!html.trim()) return { kind: "blocked", finalUrl: current, by: "empty", status: res.status };
+    return { kind: "page", html, finalUrl: current };
   }
 
   return null;
@@ -516,17 +598,25 @@ function withBrand(title: string, brand: string | null): string {
  * every field is optional — the caller asks the user for a name when the title
  * is missing.
  */
-export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
+export async function fetchLinkPreview(url: string): Promise<LinkLookup> {
   const deadline = Date.now() + LOOKUP_BUDGET_MS;
 
-  let fetched: { html: string; finalUrl: URL } | null;
+  let fetched: Fetched | null;
   try {
     fetched = await fetchHtml(url, deadline);
   } catch (err) {
     console.warn("scrape: refused or failed to fetch", url, err instanceof Error ? err.message : err);
-    return null;
+    return FAILED;
   }
-  if (!fetched) return null;
+  if (!fetched) return FAILED;
+
+  if (fetched.kind === "blocked") {
+    // Host only: the path and query of a pasted link can carry anything, and
+    // this line exists to count which shops wall us, not to record who asked.
+    const host = fetched.finalUrl.hostname;
+    console.info("scrape: blocked", host, fetched.by, fetched.status);
+    return { kind: "blocked", host, by: fetched.by, status: fetched.status };
+  }
 
   // The rules supply facts, the model reads the page like a person and picks
   // among those facts (ADR 0006). An empty card goes to the model too: a page
@@ -537,7 +627,7 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
   const suggestion = await suggestGiftCard(context, { timeoutMs: deadline - Date.now() });
   const preview = applyGiftCard(parsed, suggestion, fetched.finalUrl.hostname);
 
-  return preview.title || preview.imageUrl || preview.price ? preview : null;
+  return preview.title || preview.imageUrl || preview.price ? { kind: "card", preview } : FAILED;
 }
 
 function emptyPreview(finalUrl: URL): LinkPreview {

@@ -394,6 +394,8 @@ group("картка від моделі: межі довіри");
       { amount: 9499, currency: "UAH" },
       { amount: 8999, currency: "UAH" },
     ],
+    hasText: true,
+    numbers: [9499, 8999],
   };
 
   // Стара ціна поруч із новою: модель читає сторінку як людина й бере ту, за
@@ -484,12 +486,44 @@ group("без ключа — жодного виклику");
     throw new Error("фікстури не ходять у мережу");
   }) as typeof fetch;
 
-  const suggestion = await suggestGiftCard({ prompt: "Кейп з тканини букле", images: [], prices: [] });
+  // hasText: true, so this can only pass because the key is missing — not
+  // because the empty-page gate below happened to stop the call first.
+  const suggestion = await suggestGiftCard({
+    prompt: "Кейп з тканини букле",
+    images: [],
+    prices: [],
+    hasText: true,
+    numbers: [],
+  });
   check("без ключа відповіді немає", suggestion, null);
   check("без ключа мережі немає", calls, 0);
 
   globalThis.fetch = realFetch;
   if (key !== undefined) process.env.AI_GATEWAY_API_KEY = key;
+}
+
+// Порожня сторінка: з ключем модель однаково не викликається — читати нічого,
+// а здогадку з самої адреси потім не відрізнити від факту (#20).
+group("порожня сторінка — жодного виклику навіть з ключем");
+{
+  const key = process.env.AI_GATEWAY_API_KEY;
+  process.env.AI_GATEWAY_API_KEY = "fixture-key";
+
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("фікстури не ходять у мережу");
+  }) as typeof fetch;
+
+  const empty = buildPageContext("<html><head><title>Makeup</title></head><body></body></html>", new URL("https://makeup.com.ua/ua/product/969935/"), null);
+  const suggestion = await suggestGiftCard(empty);
+  check("порожня сторінка: відповіді немає", suggestion, null);
+  check("порожня сторінка: мережі немає", calls, 0);
+
+  globalThis.fetch = realFetch;
+  if (key === undefined) delete process.env.AI_GATEWAY_API_KEY;
+  else process.env.AI_GATEWAY_API_KEY = key;
 }
 
 if (failures.length === 0) {
