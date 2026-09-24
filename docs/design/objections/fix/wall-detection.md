@@ -78,13 +78,15 @@ BAR:        Drop sec-fetch-mode, or assert against what a local server received.
 HISTORY:    r1 open (adversary) -> r1 proposed (advocate: drop the whole sec-fetch-* group — we cannot send it faithfully — and keep User-Agent, Accept, Accept-Language, sec-ch-ua*, upgrade-insecure-requests. Because this departs from the measured set, answear.ua and watsons.ua are re-measured with the final set before merge and the result recorded in docs/verification; if either stops opening, the set is revisited. The unit test asserts only headers fetch does not rewrite (User-Agent, Accept-Language).)
             -> r1d verified (delta-adversary: scratchpad/d3.mjs without sec-fetch-* — answear.ua 200 369 KB, watsons.ua 200 476 KB, with Chrome 154 and 140, home IP, home pages. Condition: the pre-merge re-measure adds one product page per shop and is recorded.)
 
-[OBJ-5] severity: minor | status: verified
+[OBJ-5] severity: minor | status: proposed
 CLAIM:      Criteria drop the bound's verify:flows item; the grep can pass with the UA moved; no test at buildDraftFromUrl; content-type check precedes the empty-body rule.
 EVIDENCE:   Bound phase 1 "Done"; criterion 4's grep is scrape.ts only; gifts.ts:253-254 untested; plan §1 order.
 SCENARIO:   All green while the UA ships from another file or an empty 2xx walks the old path.
 BAR:        Run verify:flows; grep all of src/ and api/; a unit test for the caller; make the empty-body rule and criterion 1 agree.
 HISTORY:    r1 open (adversary) -> r1 proposed (advocate: (a) verify:flows is run and recorded, with the note that it never pastes a link; (b) criterion 4's grep covers src/ and api/; (c) the caller's mapping moves into an exported pure helper `draftFromLookup(url, result)` in gifts.ts with a unit test that a blocked and a failed result both give `{ url }`; (d) a 2xx with Content-Length 0 or an empty stream is "blocked/empty" whatever its content-type; a non-HTML 2xx with a body stays "failed".)
             -> r1d verified (delta-adversary: blocked and failed both map to { url } and the name question, gifts.ts:298, C4 holds. Condition for D9: read the first chunk before cancelling a non-HTML 2xx; a 204 comes out blocked/empty.)
+            -> review-ledger reopened (part (a) "verify:flows is run and recorded" did not happen: the harness refuses any database without "staging" in its name, scripts/flows/harness.ts:212, and only `neondb` is configured locally)
+            -> advocate proposes accepted-risk (bound: verify:flows never pastes a link, scripts/flows/core.ts:174; the only change in gifts.ts is the draftFromLookup extraction, pinned by src/features/gifts.test.ts; the criterion ships as UNKNOWN, not green) — pending confirmation by the review pass
 
 [OBJ-6] severity: minor | status: verified
 CLAIM:      With hasText gating the model, verify:scrape's "no key -> no call" check passes for the wrong reason.
@@ -129,3 +131,21 @@ HISTORY:    r1 open (lens) -> r1 proposed (advocate: one `discard(res)` helper c
 note (not an objection, lens pass): a page whose body keeps trickling past the deadline loses a card whose <title> arrived in the first chunk (run.mts `dribble` -> null at 8005 ms). Pre-existing, not made worse here; filed as a separate issue.
 
 Round 1 delta: reviewed (scratchpad/delta-r1.md, D1-D13); no new blocker or major raised. Converged.
+
+# Review pass (step 8), 2026-09-24
+
+Two fresh-context reviewers, different angles (risk key MONEY_SYMBOLS fired): ledger (log first, then diff) and fresh eyes (diff only, review-diff checklist, not shown the log).
+
+Ledger findings:
+- REVIEW-L1 (major): criterion 4's own check failed — "WishlistBot" survived in a code comment (scrape.ts:54). Fixed: comment reworded; `! grep -rq "WishlistBot" src api` now passes.
+- REVIEW-L2 (major): OBJ-5 was ruled verified while verify:flows never ran. Reopened above; proposed accepted-risk.
+- REVIEW-L3 (minor): no test for cancelling a non-HTML 2xx body. Fixed: "a non-HTML file" row in the release test; removing the cancel in hasNoBody now fails 1 test.
+- REVIEW-L4 (minor): no test for a price found only in the markup. Fixed: og:description «Сукня 1200» test; ignoring markup numbers now fails 1 test.
+- REVIEW-L5 (note): UA test tightened to Chrome/154; a whitespace-only non-HTML 2xx is "failed" (hasNoBody checks for zero bytes) and the watsons product page has a price but no rules-only title (with no model key the draft is { url }) — both recorded in docs/verification.
+
+Fresh-eyes findings (no blocker, no major):
+- REVIEW-F1 (minor): the page-number reader was a second grammar that disagreed with parsePrice ("Ціна: 1.299" rejected a correct 1299). Fixed: `amountsIn` in src/lib/price.ts reuses parsePrice's own findNumbers + parseAmount; tests for "1.299" and "1,299"; a naive reader mutation fails 4 tests. Space-joined numbers ("44 1200", "15 499") still read as one and drop the price — the safe side, pinned by a test.
+- REVIEW-F2 (minor): the BROWSER_HEADERS comment cites docs/research/scraper-bot-protection.md, which lands with PR #21. Handled by merge order: PR #21 merges first (stated in this PR's body).
+- REVIEW-F3 (note, pre-existing): a page with no currency still takes the model's currency unchecked ("Сукня 1200" answered as USD). Out of scope; filed as a separate issue.
+- REVIEW-F4 (note): makeup.com.ua sends ~2 KB of challenge script to a browser-like request, so the header — not the empty body — catches it. Fixed: the aws-waf fixture now has a non-empty body.
+
